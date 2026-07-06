@@ -167,7 +167,26 @@ public final class Modules {
                 .add(new Setting("swing", "s.swing", true))
                 .add(new Setting("sneak", "s.sneak", true))
                 .add(new Setting("equip", "s.equip", true));
+        // Chat optimisation: replace vanilla chat with a custom renderer — collapse repeated
+        // messages into one "×N" line, keep more history, show a player head per line.
+        // The GuiNewChat.drawChat hook is skipped only while this is ON (default off = vanilla).
+        add("ChatOptimize", "Chat", false).desc("d.chatopt")
+                .add(new Setting("compress", "s.chat_compress", true))  // collapse repeats -> ×N
+                .add(new Setting("heads", "s.chat_heads", false))       // player head per line (WIP: off)
+                .add(new Setting("infinite", "s.chat_infinite", true))  // keep long history / scroll
+                .add(new Setting("lines", "s.chat_lines", 200, 40, 1000, 20)) // history cap
+                .add(new Setting("opacity", "s.chat_opacity", 60, 0, 100, 5)); // bg opacity %
+        // Translator: adds a small button beside each chat line to translate it into a chosen
+        // language (Google free endpoint, no key). Works on its own — enabling it turns on the
+        // custom chat renderer too, so the button can be drawn/clicked. Item text: WIP.
+        add("Translator", "Chat", false).desc("d.translator")
+                .add(new Setting("lang", "s.tr_lang", new String[] { "s.tr_ja", "s.tr_en", "s.tr_zh",
+                        "s.tr_ko", "s.tr_es", "s.tr_fr", "s.tr_de", "s.tr_ru", "s.tr_pt", "s.tr_it" }, 0))
+                .add(new Setting("items", "s.tr_items", false)); // auto-translate item tooltips on hover
     }
+
+    /** Google language codes matching the Translator "lang" enum order above. */
+    public static final String[] TR_LANGS = { "ja", "en", "zh-CN", "ko", "es", "fr", "de", "ru", "pt", "it" };
 
     private static Module add(String name, String category, boolean def) {
         Module m = new Module(name, category, def);

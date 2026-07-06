@@ -49,6 +49,9 @@ public final class Transformer implements ClassFileTransformer {
     // GuiIngame. showCrosshair() is its only ()->boolean method, b()Z. We filter its
     // return value so the vanilla crosshair hides while our Crosshair module is on.
     private static final String GUIINGAME = "avo";
+    // GuiNewChat (resolved at runtime as "avt"). drawChat(int updateCounter) = a(I)V renders
+    // the chat lines. When ChatOptimize is ON we skip it and draw our own chat instead.
+    private static final String GUINEWCHAT = "avt";
     // PlayerControllerMP. attackEntity(EntityPlayer, Entity) = a(wn,pk)V — entry hook
     // records the reach distance of each hit for the Reach HUD.
     private static final String PLAYERCONTROLLER = "bda";
@@ -94,7 +97,8 @@ public final class Transformer implements ClassFileTransformer {
                 && !name.equals(GUIBUTTON) && !name.equals(GUIMAINMENU)
                 && !name.equals(GUIINGAME) && !name.equals(PLAYERCONTROLLER)
                 && !name.equals(ENTITYRENDERER) && !name.equals(GUI)
-                && !name.equals(FONTRENDERER) && !name.equals(RENDERLIVING)) return null;
+                && !name.equals(FONTRENDERER) && !name.equals(RENDERLIVING)
+                && !name.equals(GUINEWCHAT) && !name.equals(GUISCREEN)) return null;
         try {
             final String cn = name;
             ClassReader cr = new ClassReader(bytes);
@@ -111,6 +115,12 @@ public final class Transformer implements ClassFileTransformer {
                     // panorama / Minecraft logo / stock buttons come back exactly as vanilla.
                     final boolean mainMenu = cn.equals(GUIMAINMENU) && mName.equals("a") && desc.equals("(IIF)V");
                     final boolean guiButton = cn.equals(GUIBUTTON) && mName.equals("a") && desc.equals("(Lave;II)V");
+                    // GuiNewChat.drawChat(int) — ChatOptimize replaces it with our own renderer.
+                    final boolean drawChat = cn.equals(GUINEWCHAT) && mName.equals("a") && desc.equals("(I)V");
+                    // GuiScreen.drawHoveringText(List<String>, x, y) = (Ljava/util/List;II)V — the
+                    // Translator "items" option rewrites the tooltip lines to the target language.
+                    final boolean tooltip = cn.equals(GUISCREEN) && desc.equals("(Ljava/util/List;II)V");
+                    if (tooltip) System.out.println("[IEA] tooltip hook = " + cn + "." + mName + desc);
 
                     final boolean onFrame = cn.equals(DISPLAY) && mName.equals("update") && desc.equals("()V");
                     final boolean grab = cn.equals(MOUSE) && mName.equals("setGrabbed") && desc.equals("(Z)V");
@@ -164,6 +174,9 @@ public final class Transformer implements ClassFileTransformer {
                         if (mName.equals("getDX")) ef = "filterDX";
                         else if (mName.equals("getDY")) ef = "filterDY";
                         else if (mName.equals("getDWheel")) ef = "filterWheel";
+                        // getEventDWheel is the wheel path used while a GuiScreen (chat input) is
+                        // open — hook it so ChatOptimize can scroll its history there.
+                        else if (mName.equals("getEventDWheel")) ef = "filterEventWheel";
                         if (ef != null) ed = "(I)I";
                     } else if (cn.equals(MOUSE) && mName.equals("next") && desc.equals("()Z")) {
                         ef = "filterEvent"; ed = "(Z)Z";
@@ -184,6 +197,7 @@ public final class Transformer implements ClassFileTransformer {
                             && !itemTransform && !eyeMethod && !splash && !attack
                             && !fovMethod && !hotbar && !statIcon && !fontDraw && !fontWidthM
                             && !fontCharM && !mainMenu && !guiButton && !setBright && !renderSky
+                            && !drawChat && !tooltip
                             && !soundVol && !nameTag && !canRenderName && exitFilter == null) return mv;
 
                     return new AdviceAdapter(Opcodes.ASM5, mv, access, mName, desc) {
@@ -220,17 +234,20 @@ public final class Transformer implements ClassFileTransformer {
                                         new Object[] { GUIBUTTON, "ave", Opcodes.INTEGER, Opcodes.INTEGER },
                                         0, new Object[0]);
                             }
-                            if (renderSky) { // CustomSky on: draw our sky + return; else vanilla
-                                visitMethodInsn(Opcodes.INVOKESTATIC, HOOK, "customSkyOn", "()Z", false);
+                            if (drawChat) { // ChatOptimize/Translator on: skip vanilla chat (we draw
+                                             // our own in onFrame, where the GL/font state is consistent)
+                                visitMethodInsn(Opcodes.INVOKESTATIC, HOOK, "chatOverlayOn", "()Z", false);
                                 Label cont = new Label();
                                 visitJumpInsn(Opcodes.IFEQ, cont);
-                                loadArg(0); loadArg(1);
-                                visitMethodInsn(Opcodes.INVOKESTATIC, HOOK, "drawCustomSky", "(FI)V", false);
                                 visitInsn(Opcodes.RETURN);
                                 visitLabel(cont);
-                                visitFrame(Opcodes.F_NEW, 3,
-                                        new Object[] { RENDERGLOBAL, Opcodes.FLOAT, Opcodes.INTEGER },
-                                        0, new Object[0]);
+                                visitFrame(Opcodes.F_NEW, 2,
+                                        new Object[] { GUINEWCHAT, Opcodes.INTEGER }, 0, new Object[0]);
+                            }
+                            if (tooltip) { // Translator items: rewrite the tooltip lines in place
+                                loadArg(0); // List<String> textLines
+                                visitMethodInsn(Opcodes.INVOKESTATIC, HOOK, "translateTooltip",
+                                        "(Ljava/util/List;)V", false);
                             }
                             if (onFrame) visitMethodInsn(Opcodes.INVOKESTATIC, HOOK, "onFrame", "()V", false);
                             if (grab) {
@@ -359,6 +376,13 @@ public final class Transformer implements ClassFileTransformer {
                         protected void onMethodExit(int opcode) {
                             if (itemRenderFv) {
                                 visitMethodInsn(Opcodes.INVOKESTATIC, HOOK, "itemRenderExit", "()V", false);
+                            }
+                            if (renderSky && opcode == RETURN) {
+                                // Overlay the custom sky AFTER vanilla drew its day/night gradient +
+                                // sun/moon, exactly like OptiFine. drawCustomSky no-ops unless a pack
+                                // sky is loaded, so this is a cheap gate with no bytecode branch.
+                                loadArg(0); loadArg(1);
+                                visitMethodInsn(Opcodes.INVOKESTATIC, HOOK, "drawCustomSky", "(FI)V", false);
                             }
                             if (entityRender && opcode == IRETURN) {
                                 // draw the Hitbox AFTER the entity's own model so it layers on top.

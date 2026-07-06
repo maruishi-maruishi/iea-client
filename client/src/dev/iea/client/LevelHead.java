@@ -44,6 +44,7 @@ public final class LevelHead {
     private static final Pattern WINS = Pattern.compile("\"wins_bedwars\"\\s*:\\s*([0-9]+)");
     private static final Pattern CAUSE = Pattern.compile("\"cause\"\\s*:\\s*\"([^\"]*)\"");
     private static boolean okLogged; // log the first successful lookup once
+    private static int lastErrCode;  // throttle repeated API-error logging
     private static final ExecutorService pool = Executors.newFixedThreadPool(2, new ThreadFactory() {
         public Thread newThread(Runnable r) {
             Thread t = new Thread(r, "IEA-LevelHead");
@@ -115,11 +116,14 @@ public final class LevelHead {
             InputStream in = (code >= 200 && code < 300) ? c.getInputStream() : c.getErrorStream();
             String body = read(in);
             if (code != 200) {
-                Matcher mc = CAUSE.matcher(body);
-                String cause = mc.find() ? mc.group(1) : "";
-                System.out.println("[IEA] LevelHead: API HTTP " + code
-                        + (cause.isEmpty() ? "" : " - " + cause)
-                        + (code == 403 ? " (check your API key)" : code == 429 ? " (rate limited)" : ""));
+                if (lastErrCode != code) { // throttle: log each distinct error once, not per lookup
+                    lastErrCode = code;
+                    Matcher mc = CAUSE.matcher(body);
+                    String cause = mc.find() ? mc.group(1) : "";
+                    System.out.println("[IEA] LevelHead: API HTTP " + code
+                            + (cause.isEmpty() ? "" : " - " + cause)
+                            + (code == 403 ? " (check your API key)" : code == 429 ? " (rate limited)" : ""));
+                }
                 cache.put(uuid, fill(NONE));
                 return;
             }

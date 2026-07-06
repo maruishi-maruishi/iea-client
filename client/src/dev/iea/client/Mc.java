@@ -1737,6 +1737,180 @@ public final class Mc {
         } catch (Throwable ignored) { }
     }
 
+    // --- Chat heads: resolve a player's skin texture by name -----------------
+    // Reuses the Ping player-info map (UUID -> NetworkPlayerInfo). For a sender name we find
+    // its NetworkPlayerInfo, call getLocationSkin() (the ResourceLocation getter), bind it via
+    // the TextureManager and hand back the GL texture id so the chat overlay can draw the face.
+    private static Method infoSkinM;       // NetworkPlayerInfo.getLocationSkin() -> ResourceLocation
+    private static Method infoSkinTypeM;   // NetworkPlayerInfo.getSkinType() -> String ("slim"/"default")
+    private static Field tmField;          // Minecraft -> TextureManager
+    private static Method tmGetTexM;       // TextureManager.getTexture(ResourceLocation) -> ITextureObject
+    private static Method glIdM;           // ITextureObject.getGlTextureId() -> int
+    private static Method profGetNameM;
+    private static boolean headResolved;
+    private static int headAttempts;
+    private static long infoCacheAt;
+    private static final java.util.HashMap<String, Object> nameToInfo = new java.util.HashMap<String, Object>();
+
+    private static void refreshPlayerInfo() {
+        Object p = thePlayer();
+        if (p == null) return;
+        long now = System.currentTimeMillis();
+        if (now - infoCacheAt < 1000 && !nameToInfo.isEmpty()) return; // ~1/s
+        infoCacheAt = now;
+        try {
+            if (netHandlerField == null && !pingSearched) { pingSearched = true; discoverPing(p); }
+            if (netHandlerField == null) return;
+            Object nh = netHandlerField.get(p);
+            if (nh == null) return;
+            Map<?, ?> map = (Map<?, ?>) infoMapField.get(nh);
+            if (map == null) return;
+            nameToInfo.clear();
+            for (Object info : map.values()) {
+                if (info == null) continue;
+                if (infoProfileField == null) {
+                    for (Field f : info.getClass().getDeclaredFields())
+                        if (f.getType().getName().equals("com.mojang.authlib.GameProfile")) {
+                            f.setAccessible(true); infoProfileField = f; break;
+                        }
+                    if (infoProfileField == null) return;
+                }
+                Object prof = infoProfileField.get(info);
+                if (prof == null) continue;
+                if (profGetNameM == null) profGetNameM = prof.getClass().getMethod("getName");
+                Object nm = profGetNameM.invoke(prof);
+                if (nm instanceof String && !((String) nm).isEmpty())
+                    nameToInfo.put(((String) nm).toLowerCase(), info);
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    /** Lowercased names of players currently in the tab list (for chat-sender detection). */
+    public static java.util.Set<String> onlineNames() {
+        refreshPlayerInfo();
+        return new java.util.HashSet<String>(nameToInfo.keySet());
+    }
+
+    private static int headDbg = 0;
+    private static void hdbg(String s) {
+        if (headDbg < 14) { headDbg++; System.out.println("[IEA] head: " + s); }
+    }
+
+    /** GL texture id of a player's skin by name (WITHOUT binding through GlStateManager, so the
+     *  world's texture cache stays intact) and slim flag, or null if unknown / not loaded. */
+    public static int[] headSkin(String name) {
+        if (name == null || minecraft == null) return null;
+        refreshPlayerInfo();
+        Object info = nameToInfo.get(name.toLowerCase());
+        if (info == null) { hdbg("no-info name=" + name + " known=" + nameToInfo.size()); return null; }
+        try {
+            // Resolve the skin methods against a KNOWN-GOOD info. The sender's own info may have
+            // no loaded skin (getLocationSkin returns null on servers), so try every tab-list
+            // entry until one resolves (self / any player with a loaded skin always does).
+            if (!headResolved) {
+                if (headAttempts++ > 400) return null;
+                for (Object cand : nameToInfo.values()) {
+                    if (cand == null) continue;
+                    resolveHeadMethods(cand);
+                    if (infoSkinM != null && tmField != null && tmGetTexM != null) { headResolved = true; break; }
+                }
+                if (headResolved) {
+                    System.out.println("[IEA] chat heads: skin=" + infoSkinM.getName()
+                            + " tm=" + tmField.getName() + " getTex=" + tmGetTexM.getName());
+                } else { hdbg("resolving known=" + nameToInfo.size()); return null; }
+            }
+            Object loc = infoSkinM.invoke(info); // triggers the skin download (like vanilla); returns loc
+            if (loc == null) { hdbg("no-loc name=" + name); return null; }
+            Object tm = tmField.get(minecraft);
+            if (tm == null) return null;
+            Object texObj = tmGetTexM.invoke(tm, loc); // lookup only — no bind, no GlStateManager touch
+            if (texObj == null) { hdbg("no-tex name=" + name + " loc=" + loc); return null; } // skin not loaded yet
+            // Resolve getGlTextureId() lazily: only once we actually have a loaded texture object
+            // (at resolve time the skin may not be downloaded, so this can't be found up front).
+            if (glIdM == null) {
+                for (Method mm : texObj.getClass().getMethods()) {
+                    if (mm.getParameterTypes().length == 0 && mm.getReturnType() == int.class) {
+                        try {
+                            Object v = mm.invoke(texObj);
+                            if (v instanceof Integer && ((Integer) v).intValue() > 0) {
+                                mm.setAccessible(true); glIdM = mm;
+                                System.out.println("[IEA] chat heads: glId=" + mm.getName());
+                                break;
+                            }
+                        } catch (Throwable ignored) { }
+                    }
+                }
+                if (glIdM == null) { hdbg("no-glid tex=" + texObj.getClass().getName()); return null; }
+            }
+            int id = ((Integer) glIdM.invoke(texObj)).intValue();
+            if (id <= 0) { hdbg("id0 name=" + name); return null; }
+            hdbg("OK name=" + name + " id=" + id);
+            boolean slim = false;
+            if (infoSkinTypeM != null) slim = "slim".equals(infoSkinTypeM.invoke(info));
+            return new int[] { id, slim ? 1 : 0 };
+        } catch (Throwable t) { hdbg("ex " + t); return null; }
+    }
+
+    private static void resolveHeadMethods(Object info) {
+        infoSkinM = null; infoSkinTypeM = null; tmField = null; tmGetTexM = null; // eval this candidate cleanly
+        try {
+            // getLocationSkin: a no-arg method returning an obf ResourceLocation (>=2 String
+            // fields: domain/path) whose value is non-null and not a cape.
+            for (Method mm : info.getClass().getMethods()) {
+                if (mm.getParameterTypes().length != 0) continue;
+                Class<?> rt = mm.getReturnType();
+                if (rt.isPrimitive() || rt.getName().indexOf('.') >= 0) continue; // obf class only
+                if (stringFieldCount(rt) < 2) continue;
+                Object v;
+                try { v = mm.invoke(info); } catch (Throwable e) { continue; }
+                if (v == null) continue;
+                String s = String.valueOf(v).toLowerCase();
+                if (s.contains("cape") || s.contains("cloak") || s.contains("elytra")) continue;
+                mm.setAccessible(true); infoSkinM = mm; break;
+            }
+            // getSkinType: no-arg String method returning "default"/"slim"
+            for (Method mm : info.getClass().getMethods()) {
+                if (mm.getParameterTypes().length == 0 && mm.getReturnType() == String.class) {
+                    try {
+                        Object v = mm.invoke(info);
+                        if ("default".equals(v) || "slim".equals(v)) { mm.setAccessible(true); infoSkinTypeM = mm; break; }
+                    } catch (Throwable ignored) { }
+                }
+            }
+            // TextureManager: the Minecraft field whose class has getTexture(ResourceLocation)
+            // -> ITextureObject. We read the id via getTexture (a plain map lookup) rather than
+            // bindTexture, so we never mutate GlStateManager's texture cache (which was turning
+            // player bodies white the next frame).
+            if (infoSkinM != null) {
+                Class<?> resLoc = infoSkinM.getReturnType();
+                for (Field f : minecraft.getClass().getDeclaredFields()) {
+                    if (Modifier.isStatic(f.getModifiers())) continue;
+                    Class<?> t = f.getType();
+                    if (t.isPrimitive() || t.isArray() || t.getName().indexOf('.') >= 0) continue;
+                    boolean hasBind = false; Method getTex = null;
+                    for (Method mm : t.getDeclaredMethods()) {
+                        if (mm.getParameterTypes().length != 1 || mm.getParameterTypes()[0] != resLoc) continue;
+                        if (mm.getReturnType() == void.class) hasBind = true; // bindTexture -> confirms TextureManager
+                        else if (!mm.getReturnType().isPrimitive() && mm.getReturnType() != resLoc
+                                && mm.getReturnType().getName().indexOf('.') < 0) getTex = mm; // getTexture -> ITextureObject
+                    }
+                    if (hasBind && getTex != null) {
+                        f.setAccessible(true); getTex.setAccessible(true);
+                        tmField = f; tmGetTexM = getTex; break;
+                    }
+                }
+            }
+            // getGlTextureId() is resolved lazily in headSkin (needs an actually-loaded texture);
+            // success is logged by the caller once all methods are found.
+        } catch (Throwable ignored) { }
+    }
+
+    private static int stringFieldCount(Class<?> c) {
+        int n = 0;
+        for (Field f : c.getDeclaredFields()) if (f.getType() == String.class) n++;
+        return n;
+    }
+
     // --- ServerAddress: NetHandlerPlayClient.netManager.getRemoteAddress() ---
     // Reuses the NetHandler discovered for Ping. The NetworkManager is the NetHandler
     // field whose type declares a no-arg method returning a java.net.SocketAddress
@@ -1814,6 +1988,27 @@ public final class Mc {
                 }
             }
             return currentScreenField != null && currentScreenField.get(minecraft) != null;
+        } catch (Throwable t) { return false; }
+    }
+
+    // GuiChat has no reliable structural signature, so we LEARN its class: the caller arms this
+    // when the chat key (T / "/") is pressed, and we snapshot whatever screen opens next.
+    private static Class<?> chatScreenClass;
+    public static void captureChatScreen() {
+        try {
+            if (currentScreenField == null) isVanillaScreenOpen(); // resolve the field
+            if (currentScreenField == null || minecraft == null) return;
+            Object s = currentScreenField.get(minecraft);
+            if (s != null) chatScreenClass = s.getClass();
+        } catch (Throwable ignored) { }
+    }
+
+    /** True when the currently-open vanilla screen is the (learned) chat screen. */
+    public static boolean isChatOpen() {
+        try {
+            if (chatScreenClass == null || currentScreenField == null || minecraft == null) return false;
+            Object s = currentScreenField.get(minecraft);
+            return s != null && s.getClass() == chatScreenClass;
         } catch (Throwable t) { return false; }
     }
 
@@ -2551,6 +2746,123 @@ public final class Mc {
         return n;
     }
 
+    // --- World time / celestial angle (custom sky day-night) -----------------
+    // The custom sky needs the time of day so its layers fade in/out and the dome rotates.
+    // Both are read by reflection, identified by shape (no obf names hard-coded):
+    //   getCelestialAngle(float) is the (F)F method whose value*2π equals ANOTHER (F)F
+    //     method's value — that twin is getCelestialAngleRadians, a unique fingerprint.
+    //   getWorldTime() is the ()J method whose value, fed through vanilla's celestial-angle
+    //     formula, reproduces getCelestialAngle — distinguishing it from totalTime / seed.
+    private static Field skyWorldField;   // Minecraft -> World (re-read each call for world swaps)
+    private static Method celestialM;     // World.getCelestialAngle(float) -> float, 0..1
+    private static Method worldTimeM;     // World.getWorldTime() -> long (tick clock)
+    private static boolean skyTimeResolved;
+    private static int skyTimeAttempts;
+
+    /** Vanilla WorldProvider.calculateCelestialAngle, reproduced for identification. */
+    private static float calcCelestial(long worldTime, float partial) {
+        int i = (int) (worldTime % 24000L);
+        float f = ((float) i + partial) / 24000.0F - 0.25F;
+        if (f < 0f) f += 1f;
+        if (f > 1f) f -= 1f;
+        float f1 = f;
+        f = 1f - (float) ((Math.cos((double) f * Math.PI) + 1.0D) / 2.0D);
+        f = f1 + (f - f1) / 3f;
+        return f;
+    }
+
+    private static void resolveSkyTime() {
+        if (minecraft == null) return;
+        try {
+            for (Field f : minecraft.getClass().getDeclaredFields()) {
+                if (Modifier.isStatic(f.getModifiers())) continue;
+                Class<?> t = f.getType();
+                if (t.isPrimitive() || t.isArray() || t.getName().indexOf('.') >= 0) continue;
+                f.setAccessible(true);
+                Object w;
+                try { w = f.get(minecraft); } catch (Throwable e) { continue; }
+                if (w == null) continue;
+                Method ca = findCelestial(w);
+                if (ca == null) continue;
+                skyWorldField = f; celestialM = ca;
+                worldTimeM = findWorldTime(w, ca);
+                skyTimeResolved = true;
+                System.out.println("[IEA] sky time: celestial=" + ca.getName()
+                        + " worldTime=" + (worldTimeM == null ? "?" : worldTimeM.getName())
+                        + " on " + w.getClass().getName());
+                return;
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    // (F)F method a whose value*2π equals some other (F)F method's value == getCelestialAngle
+    private static Method findCelestial(Object world) {
+        java.util.List<Method> ff = new java.util.ArrayList<Method>();
+        for (Class<?> c = world.getClass(); c != null && c != Object.class; c = c.getSuperclass())
+            for (Method m : c.getDeclaredMethods())
+                if (!Modifier.isStatic(m.getModifiers()) && m.getReturnType() == float.class
+                        && m.getParameterTypes().length == 1 && m.getParameterTypes()[0] == float.class) {
+                    m.setAccessible(true); ff.add(m);
+                }
+        final float p = 0.37f, twoPi = (float) (Math.PI * 2.0);
+        for (Method a : ff) {
+            float av;
+            try { av = (Float) a.invoke(world, p); } catch (Throwable e) { continue; }
+            if (av < 0.06f || av > 0.94f) continue; // skip near 0/1 where *2π is ambiguous
+            float target = av * twoPi;
+            for (Method b : ff) {
+                if (b == a) continue;
+                float bv;
+                try { bv = (Float) b.invoke(world, p); } catch (Throwable e) { continue; }
+                if (Math.abs(bv - target) < 0.02f) return a;
+            }
+        }
+        return null;
+    }
+
+    // ()J method whose calcCelestial reproduces getCelestialAngle == getWorldTime
+    private static Method findWorldTime(Object world, Method ca) {
+        final float p = 0.37f;
+        float ref;
+        try { ref = (Float) ca.invoke(world, p); } catch (Throwable e) { return null; }
+        for (Class<?> c = world.getClass(); c != null && c != Object.class; c = c.getSuperclass())
+            for (Method m : c.getDeclaredMethods())
+                if (!Modifier.isStatic(m.getModifiers()) && m.getReturnType() == long.class
+                        && m.getParameterTypes().length == 0) {
+                    m.setAccessible(true);
+                    try {
+                        long tv = (Long) m.invoke(world);
+                        if (Math.abs(calcCelestial(tv, p) - ref) < 0.005f) return m;
+                    } catch (Throwable ignored) { }
+                }
+        return null;
+    }
+
+    /** Celestial angle 0..1 (0 = noon, 0.5 = midnight); -1 if unavailable. */
+    public static float celestialAngle(float partial) {
+        if (!skyTimeResolved) {
+            if (skyTimeAttempts++ > 600) return -1f;
+            resolveSkyTime();
+            if (!skyTimeResolved) return -1f;
+        }
+        try {
+            Object w = skyWorldField.get(minecraft);
+            if (w == null) return -1f;
+            return (Float) celestialM.invoke(w, partial);
+        } catch (Throwable t) { return -1f; }
+    }
+
+    /** Time of day in ticks, 0..23999 (0 = 06:00); -1 if unavailable. */
+    public static int worldTimeOfDay() {
+        if (!skyTimeResolved || worldTimeM == null) return -1;
+        try {
+            Object w = skyWorldField.get(minecraft);
+            if (w == null) return -1;
+            int i = (int) (((Long) worldTimeM.invoke(w)).longValue() % 24000L);
+            return i < 0 ? i + 24000 : i;
+        } catch (Throwable t) { return -1; }
+    }
+
     // teamMemberships = Map<playerName, ScorePlayerTeam>. On Hypixel each player gets their
     // OWN scoreboard team (for nametag colouring), so "same team object" only ever yields
     // yourself — teammates must be grouped by the team's COLOUR (ScorePlayerTeam.chatFormat,
@@ -2911,6 +3223,99 @@ public final class Mc {
                     String s = stripFormatting((String) r);
                     if (best == null || s.length() > best.length()) best = s;
                 }
+            }
+            return best;
+        } catch (Throwable t) { return null; }
+    }
+
+    // --- chat rendering model (ChatOptimize) --------------------------------
+    // Same source as DeathAlert but keeps the § formatting (so colours render) and returns
+    // the ChatLine object identity too, so the overlay can track per-line age for fading.
+    private static Field chatScrollField;       // GuiNewChat.scrollPos (its only int field)
+    private static boolean chatScrollResolved;
+
+    /** Newest-first view of the vanilla chat lines: each Object[] = { String formatted, Object chatLine }. */
+    public static java.util.List<Object[]> chatModel(int max) {
+        java.util.List<Object[]> out = new ArrayList<Object[]>();
+        resolveChat();
+        if (!chatResolved || guiNewChat == null) return out;
+        try {
+            Object v = chatLinesField.get(guiNewChat);
+            if (!(v instanceof List)) return out;
+            List<?> lines = (List<?>) v;
+            int n = Math.min(lines.size(), max);
+            for (int i = 0; i < n; i++) {
+                Object line = lines.get(i);
+                String t = lineTextFormatted(line);
+                out.add(new Object[] { t == null ? "" : t, line });
+            }
+        } catch (Throwable ignored) { }
+        return out;
+    }
+
+    /** Vanilla chat scroll offset (0 = pinned to newest); -1 if unavailable. */
+    public static int chatScrollPos() {
+        resolveChat();
+        if (!chatResolved || guiNewChat == null) return 0;
+        if (!chatScrollResolved) {
+            chatScrollResolved = true;
+            for (Field f : guiNewChat.getClass().getDeclaredFields()) {
+                if (Modifier.isStatic(f.getModifiers())) continue;
+                if (f.getType() == int.class) { f.setAccessible(true); chatScrollField = f; break; }
+            }
+        }
+        if (chatScrollField == null) return 0;
+        try { return chatScrollField.getInt(guiNewChat); } catch (Throwable t) { return 0; }
+    }
+
+    // New chat messages (formatted, § kept) since the last call, OLDEST-first for appending to
+    // the overlay's own unbounded history. Uses a separate marker from DeathAlert's reader. The
+    // first call seeds with the currently-visible chat so history isn't empty on join.
+    private static Object lastOverlayLine;
+    public static java.util.List<String> newChatLinesFormatted() {
+        java.util.List<String> out = new ArrayList<String>();
+        resolveChat();
+        if (!chatResolved || guiNewChat == null) return out;
+        try {
+            Object v = chatLinesField.get(guiNewChat);
+            if (!(v instanceof List)) return out;
+            List<?> lines = (List<?>) v;
+            if (lines.isEmpty()) return out;
+            if (lastOverlayLine == null) { // seed with existing lines (oldest-first)
+                int n = Math.min(lines.size(), 100);
+                for (int i = n - 1; i >= 0; i--) {
+                    String t = lineTextFormatted(lines.get(i));
+                    out.add(t == null ? "" : t);
+                }
+                lastOverlayLine = lines.get(0);
+                return out;
+            }
+            Object newTop = lines.get(0);
+            if (newTop == lastOverlayLine) return out; // nothing new
+            int limit = Math.min(lines.size(), 100);
+            java.util.List<String> tmp = new ArrayList<String>();
+            for (int i = 0; i < limit; i++) {
+                Object line = lines.get(i);
+                if (line == lastOverlayLine) break;
+                String t = lineTextFormatted(line);
+                tmp.add(t == null ? "" : t);
+            }
+            lastOverlayLine = newTop;
+            for (int i = tmp.size() - 1; i >= 0; i--) out.add(tmp.get(i)); // oldest-first
+        } catch (Throwable ignored) { }
+        return out;
+    }
+
+    private static String lineTextFormatted(Object line) {
+        try {
+            Object comp = chatLineCompField.get(line);
+            if (comp == null) return null;
+            String best = null;
+            for (Method m : compTextMethods) {
+                Object r;
+                try { r = m.invoke(comp); } catch (Throwable e) { continue; }
+                if (r instanceof String && (best == null || ((String) r).length() > best.length()))
+                    best = (String) r;
             }
             return best;
         } catch (Throwable t) { return null; }

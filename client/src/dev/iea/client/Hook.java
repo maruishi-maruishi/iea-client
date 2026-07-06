@@ -90,6 +90,18 @@ public final class Hook {
     // straight from the event queue during the drain below (more reliable than
     // depending on Minecraft to poll getDWheel while the mouse is ungrabbed).
     public static int filterWheel(int v) { return blockGameInput() ? 0 : v; }
+
+    /** getEventDWheel: the wheel path while a GuiScreen is open. Feed our chat scroll only when
+     *  the CHAT screen is open (so inventory/creative scrolling is untouched); pass the value on. */
+    public static int filterEventWheel(int v) {
+        if (v != 0) {
+            try {
+                if (inited && chatOverlayOn() && Mc.isChatOpen())
+                    dev.iea.client.render.ChatOverlay.onWheel(v);
+            } catch (Throwable ignored) { }
+        }
+        return v;
+    }
     private static boolean draining = false;
     public static boolean filterEvent(boolean v) {
         if (draining) return v;        // let our own drain loop see real events
@@ -430,6 +442,128 @@ public final class Hook {
         finally { fontBypass = false; }
     }
 
+    // --- ChatOptimize: custom chat renderer (replaces GuiNewChat.drawChat) -----
+    public static boolean chatOptimizeOn() {
+        try { return inited && Modules.on("ChatOptimize"); } catch (Throwable t) { return false; }
+    }
+
+    /** Translator (per-line translate button) is on. Uses the same custom chat renderer. */
+    public static boolean translatorOn() {
+        try { return inited && Modules.on("Translator"); } catch (Throwable t) { return false; }
+    }
+
+    /** The custom chat renderer is active when EITHER chat feature is on (they share it). */
+    public static boolean chatOverlayOn() { return chatOptimizeOn() || translatorOn(); }
+
+    /** Selected target language code for the Translator, e.g. "ja" (default). */
+    public static String translateLang() {
+        try {
+            Module m = Modules.get("Translator");
+            int i = (m == null) ? 0 : (int) m.num("lang", 0);
+            String[] codes = Modules.TR_LANGS;
+            return (i >= 0 && i < codes.length) ? codes[i] : "ja";
+        } catch (Throwable t) { return "ja"; }
+    }
+
+    /** Translator "items": rewrite item-tooltip lines to the target language in place. Called
+     *  from GuiScreen.drawHoveringText at entry. Async + cached — a line stays original until
+     *  its translation is ready, then flips to it (leading § colour codes are preserved). */
+    public static void translateTooltip(java.util.List lines) {
+        try {
+            if (!inited || !translatorOn() || lines == null || lines.isEmpty()) return;
+            Module m = Modules.get("Translator");
+            if (m == null || !m.bool("items")) return;
+            String lang = translateLang();
+            for (int i = 0; i < lines.size(); i++) {
+                Object o = lines.get(i);
+                if (!(o instanceof String)) continue;
+                String line = (String) o;
+                String stripped = Mc.stripFormatting(line);
+                if (stripped == null || stripped.trim().isEmpty()) continue;
+                String tr = dev.iea.client.Translate.get(stripped, lang);
+                if (tr == null || tr.isEmpty() || tr.equals(stripped)) continue; // pending/failed/same
+                lines.set(i, leadingCodes(line) + tr);
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    // The run of leading "§x" formatting codes at the start of a line (kept on the translation
+    // so an item name's rarity colour etc. survives).
+    private static String leadingCodes(String s) {
+        StringBuilder b = new StringBuilder();
+        int i = 0;
+        while (i + 1 < s.length() && s.charAt(i) == '§') { b.append('§').append(s.charAt(i + 1)); i += 2; }
+        return b.toString();
+    }
+
+    private static int chatCalls = 0;
+    private static boolean prevVScreen = false; // tracks chat-screen open/close for chat scroll reset
+    private static boolean prevChatKey = false, chatKeyArmed = false; // learn the chat-screen class
+    private static int hudScaledW = 0, hudScaledH = 0; // real scaled resolution, cached in drawHotbar
+    /** Draw our chat inside onFrame's Surface pass (where GL/font state is consistent), at
+     *  vanilla's exact GUI scale. Called only while ChatOptimize is on and in a world. */
+    public static void renderChat(int w, int h) {
+        try {
+            int sw, sh, sf;
+            if (hudScaledW > 0) { // vanilla's real scale factor = display px / scaled px
+                sw = hudScaledW; sh = hudScaledH;
+                sf = Math.max(1, Math.round((float) w / hudScaledW));
+            } else {              // fallback: MC auto-scale (guiScale = auto)
+                sf = guiScaleFactor(w, h); sw = w / sf; sh = h / sf;
+            }
+            if (++chatCalls == 1) System.out.println("[IEA] chat scale: display=" + w + "x" + h
+                    + " scaled=" + sw + "x" + sh + " sf=" + sf
+                    + " hudScaled=" + hudScaledW + "x" + hudScaledH);
+            // Feed the overlay the mouse in scaled (GUI) units + a fresh left-click edge, but
+            // only while the chat input is open (that's when the cursor is free to click a button).
+            boolean chatOpen = Mc.isChatOpen();
+            float mx = Mouse.getX() / (float) sf;
+            float my = (h - Mouse.getY()) / (float) sf;
+            boolean down = chatOpen && Mouse.isButtonDown(0);
+            boolean edge = down && !prevChatMouseDown;
+            prevChatMouseDown = down;
+            dev.iea.client.render.ChatOverlay.setPointer(mx, my, chatOpen, edge);
+
+            GL11.glPushMatrix();
+            GL11.glScalef(sf, sf, 1f); // draw in scaled (GUI) units like vanilla chat
+            try { dev.iea.client.render.ChatOverlay.render(sw, sh); }
+            finally { GL11.glPopMatrix(); }
+        } catch (Throwable ignored) { }
+    }
+    private static boolean prevChatMouseDown = false; // rising-edge for the chat translate button
+
+    // Minecraft's auto GUI scale (guiScale = auto). Fallback when the real value isn't cached.
+    private static int guiScaleFactor(int w, int h) {
+        int sf = 1;
+        while (sf < 6 && w / (sf + 1) >= 320 && h / (sf + 1) >= 240) sf++;
+        return sf;
+    }
+
+    /** Chat text width through the FontRenderer funnel (NO bypass) so it follows the IEAFont
+     *  toggle and matches what chatDrawText renders. */
+    public static int chatTextWidth(String s) {
+        Object fr = frRef();
+        if (fr == null || s == null) return 0;
+        ensureFrMethods(fr);
+        if (frWidthM == null) return 0;
+        try { return ((Integer) frWidthM.invoke(fr, s)).intValue(); }
+        catch (Throwable t) { return 0; }
+    }
+
+    /** Draw chat text through the FontRenderer funnel WITHOUT the bypass, so the IEAFont hook
+     *  applies: IEA font when IEAFont is on, vanilla when off — both with § colours. */
+    public static void chatDrawText(String s, float x, float y, int color, boolean shadow) {
+        Object fr = frRef();
+        if (fr == null || s == null) return;
+        ensureFrMethods(fr);
+        if (frDrawM == null) return;
+        try {
+            GL11.glEnable(GL11.GL_TEXTURE_2D);
+            frDrawM.invoke(fr, s, Float.valueOf(x), Float.valueOf(y),
+                    Integer.valueOf(color), Boolean.valueOf(shadow));
+        } catch (Throwable ignored) { }
+    }
+
     private static void vanillaDraw(Object fr, String s, float x, float y, int color, boolean shadow) {
         fontBypass = true;
         try {
@@ -693,6 +827,10 @@ public final class Hook {
     // the vanilla RenderItem (cache-routed, so it stays consistent) + GUI lighting.
     public static boolean drawHotbar(Object gui, Object sr, float partial) {
         try {
+            // Cache the REAL scaled resolution every frame (before the module gate) so the chat
+            // overlay can match vanilla's exact GUI scale instead of guessing.
+            int[] whc = Mc.scaledSize(sr);
+            if (whc != null && whc[0] > 0) { hudScaledW = whc[0]; hudScaledH = whc[1]; }
             if (!inited || !Modules.on("Hotbar")) return false;
             int[] wh = Mc.scaledSize(sr);
             if (wh == null) return false;
@@ -867,16 +1005,21 @@ public final class Hook {
         catch (Throwable t) { return true; }
     }
 
-    // CustomSky is a BUILT-IN feature (no toggle): the renderSky hook replaces the vanilla
-    // sky only when the selected resource pack actually provides an MCPatcher custom sky —
-    // exactly like OptiFine/Lunar (no pack sky -> vanilla sky). renderSky = bfr.a(FI)V was
-    // confirmed in-game. All sky loading/rendering is clean-room (dev.iea.client.render.Sky).
+    // CustomSky is a BUILT-IN feature (no toggle): the renderSky hook OVERLAYS the vanilla
+    // sky when the selected resource pack provides an MCPatcher custom sky — exactly like
+    // OptiFine/Lunar (no pack sky -> vanilla sky). We inject at renderSky's exit so vanilla
+    // draws its day/night gradient + sun/moon first, then our layers fade/rotate on top;
+    // that (not a static opaque box) is what makes day and night actually change.
+    // renderSky = bfr.a(FI)V. All loading/rendering is clean-room (dev.iea.client.render.Sky).
     public static boolean customSkyOn() {
         try { return Sky.isReady(); } catch (Throwable t) { return false; }
     }
 
     public static void drawCustomSky(float partial, int pass) {
-        try { Sky.render(partial); } catch (Throwable ignored) { }
+        try {
+            Sky.maybeReload();               // pick up in-game resource-pack switches
+            if (Sky.isReady()) Sky.render(partial);
+        } catch (Throwable ignored) { }
     }
 
     // Dynamic FPS: while the game window is unfocused (ALT+TAB / other apps), cap
@@ -1021,12 +1164,29 @@ public final class Hook {
                 Module satm = Modules.get("Saturation");
                 if (satm != null && satm.enabled) Saturation.render(w, h, satm.num("amount", 1f));
             }
-            if (inGame || open) {
+            // ChatOptimize: we suppress vanilla drawChat and render our own here, in the same
+            // pass the HUD/GUI text draws in — so it draws whenever in a world, including while
+            // a vanilla screen (chat input / inventory) is open, matching vanilla chat.
+            // Learn the chat-screen class: arm on the chat key (T / "/") with nothing open, then
+            // snapshot whatever screen appears next. Lets us tell the chat input from inventory.
+            boolean chatKey = Keyboard.isKeyDown(Keyboard.KEY_T) || Keyboard.isKeyDown(Keyboard.KEY_SLASH);
+            if (chatKey && !prevChatKey && !gui.isOpen() && !Mc.isVanillaScreenOpen()) chatKeyArmed = true;
+            prevChatKey = chatKey;
+            if (chatKeyArmed && Mc.isVanillaScreenOpen()) { Mc.captureChatScreen(); chatKeyArmed = false; }
+
+            // Render our chat in-game (no screen) or while the chat input is open — but NOT under
+            // inventory/other screens, so it doesn't draw on top of them (vanilla chat sits behind).
+            boolean chatOpen = Mc.isChatOpen();
+            boolean chatOn = chatOverlayOn() && Mc.localPlayer() != null && (Mouse.isGrabbed() || chatOpen);
+            if (!chatOpen && prevVScreen) dev.iea.client.render.ChatOverlay.resetScroll(); // snap to newest on close
+            prevVScreen = chatOpen;
+            if (inGame || open || chatOn) {
                 int scroll = scrollAccum; scrollAccum = 0;
                 // Surface.end MUST run even if a renderer throws — a skipped pop
                 // leaks the attrib/matrix stacks and corrupts everything afterwards
                 Surface.begin(w, h);
                 try {
+                    if (chatOn) renderChat(w, h); // behind the HUD
                     if (inGame) hud.render(hudFont, logo, fps, leftClicks.size(), rightClicks.size());
                     if (inGame) DeathAlert.render(bigFont, w, h); // teammate-death title over the HUD
                     if (open) {

@@ -179,6 +179,30 @@ public final class Lang {
                 "Switches both Minecraft's text and the IEA GUI/HUD to the IEA font. Turn it off and the GUI reverts to the vanilla font too, so the game and UI always match.");
         put("d.ieagui", "タイトル画面とボタンをIEAのデザインに変更します。オフにするとバニラ風の見た目に戻ります。",
                 "Restyles the title screen and buttons to the IEA design. Turn off for a vanilla look.");
+        // ChatOptimize
+        put("d.chatopt", "チャットを見やすくします。同じメッセージを1行に圧縮(×N)し、履歴を多く保持してスクロールできます。見た目はバニラ風のままです。",
+                "Makes chat easier to read: collapses repeated messages into one line (×N) and keeps a longer, scrollable history. Keeps the vanilla look.");
+        put("s.chat_compress", "重複メッセージを圧縮 (×N)", "Collapse duplicates (×N)");
+        put("s.chat_heads", "プレイヤーの頭を表示", "Show player heads");
+        put("s.chat_infinite", "履歴を多く保持(スクロール)", "Keep long history (scroll)");
+        put("s.chat_lines", "履歴の行数", "History lines");
+        put("s.chat_opacity", "背景の不透明度 %", "Background opacity %");
+        // Translator
+        put("d.translator", "各チャット行の横に翻訳ボタンを表示します。押すとその行を選んだ言語に翻訳してメッセージ全体を置き換えます(Google無料・APIキー不要)。「アイテムの文字も翻訳」をオンにすると、アイテムにカーソルを合わせたときの説明文も自動で翻訳します。この機能をオンにするとチャットのカスタム描画も有効になります。",
+                "Adds a translate button beside each chat line: click it to translate that line into your chosen language, replacing the whole message (Google free, no API key). Turn on \"Translate item text\" to also auto-translate item tooltips on hover. Enabling this also turns on the custom chat renderer.");
+        put("s.tr_lang", "翻訳先の言語", "Translate to");
+        put("s.tr_items", "アイテムの文字も翻訳", "Translate item text");
+        put("s.tr_ja", "日本語", "Japanese");
+        put("s.tr_en", "英語", "English");
+        put("s.tr_zh", "中国語", "Chinese");
+        put("s.tr_ko", "韓国語", "Korean");
+        put("s.tr_es", "スペイン語", "Spanish");
+        put("s.tr_fr", "フランス語", "French");
+        put("s.tr_de", "ドイツ語", "German");
+        put("s.tr_ru", "ロシア語", "Russian");
+        put("s.tr_pt", "ポルトガル語", "Portuguese");
+        put("s.tr_it", "イタリア語", "Italian");
+        put("chat_translating", "翻訳中...", "translating...");
     }
 
     public static String t(String key) {
