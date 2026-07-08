@@ -9,8 +9,15 @@ const { makePaths } = require('./minecraft/paths');
 const { launch } = require('./minecraft/launcher');
 const { offlineAccount } = require('./minecraft/auth/offline');
 const { microsoftLogin, microsoftRefresh } = require('./minecraft/auth/microsoft');
-const { loadSettings, saveSettings } = require('./settings');
+const {
+  loadSettings, saveSettings,
+  listAccounts, upsertAccount, selectAccount, removeAccount, migrateAccounts,
+} = require('./settings');
 const { initAutoUpdate } = require('./updater');
+const skins = require('./skins');
+const { getNews } = require('./news');
+const discord = require('./discord');
+const { detectPack, convertJavaPack, convertBedrockPack } = require('./resourcepack/convert');
 
 // --- memory: the launcher UI is static, so the Chromium GPU process buys us nothing.
 // Disabling hardware acceleration drops that whole process (~tens of MB + GPU buffers).
@@ -54,12 +61,17 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  migrateAccounts(userData()); // seed the account list from a legacy single account
   createWindow();
   initAutoUpdate(() => mainWindow); // GitHub Releases auto-update (packaged builds only)
+  const s = loadSettings(userData());
+  if (s.discordRpc !== false) discord.start(); // Discord Rich Presence (idle state)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+app.on('before-quit', () => { try { discord.stop(); } catch (_) {} });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -102,19 +114,90 @@ ipcMain.handle('dialog:openGameDir', (_e, dir) => {
 
 ipcMain.handle('auth:offline', (_e, username) => {
   const account = offlineAccount(username);
-  saveSettings(userData(), { account, lastUsername: account.name });
+  upsertAccount(userData(), account); // add to the switcher + make active
   return account;
 });
 
 ipcMain.handle('auth:microsoft', async () => {
   const account = await microsoftLogin((prompt) => send('auth:prompt', prompt));
-  saveSettings(userData(), { account, lastUsername: account.name });
+  upsertAccount(userData(), account);
   return account;
 });
 
 ipcMain.handle('auth:logout', () => {
   saveSettings(userData(), { account: null });
   return true;
+});
+
+// ---- account switcher ----
+ipcMain.handle('accounts:list', () => listAccounts(userData()));
+ipcMain.handle('accounts:select', (_e, id) => selectAccount(userData(), id));
+ipcMain.handle('accounts:remove', (_e, id) => removeAccount(userData(), id));
+
+// ---- player skin images (fetched here to satisfy the renderer CSP) ----
+ipcMain.handle('skin:face', (_e, uuid) => skins.faceUrl(uuid));
+ipcMain.handle('skin:body', (_e, uuid, model) => skins.bodyUrl(uuid, model));
+ipcMain.handle('skin:model', (_e, uuid) => skins.modelOf(uuid)); // 'slim' | 'classic'
+
+// ---- what's-new (GitHub releases) + app version ----
+ipcMain.handle('news:get', () => getNews());
+ipcMain.handle('app:version', () => app.getVersion());
+
+// ---- resource packs (import + convert modern Java packs to 1.8.9) ----
+function resourcePacksDir() {
+  const s = loadSettings(userData());
+  const gd = s.gameDir && s.gameDir.trim() ? s.gameDir.trim() : makePaths(userData()).gameDir;
+  const dir = path.join(gd, 'resourcepacks');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+ipcMain.handle('packs:list', () => {
+  const dir = resourcePacksDir();
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() || /\.zip$/i.test(e.name))
+      .map((e) => ({ name: e.name, folder: e.isDirectory() }));
+  } catch (_) { return []; }
+});
+
+ipcMain.handle('packs:open', () => { const d = resourcePacksDir(); shell.openPath(d); return d; });
+
+ipcMain.handle('packs:remove', (_e, name) => {
+  const dir = resourcePacksDir();
+  const target = path.join(dir, path.basename(name)); // guard against traversal
+  if (target.startsWith(dir)) fs.rmSync(target, { recursive: true, force: true });
+  return true;
+});
+
+ipcMain.handle('packs:import', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'リソースパックを選択',
+    properties: ['openFile'],
+    filters: [{ name: 'Resource pack', extensions: ['zip', 'mcpack', 'mcaddon'] }],
+  });
+  if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
+  const src = result.filePaths[0];
+  try {
+    const info = detectPack(src);
+    const dir = resourcePacksDir();
+    if (info.kind === 'bedrock') {
+      const packs = convertBedrockPack(src, dir, (t, p) => send('game:' + t, p));
+      const files = packs.reduce((a, r) => a + r.files, 0);
+      const fixed = packs.reduce((a, r) => a + r.fixed + r.anim, 0);
+      return { ok: true, kind: 'bedrock', name: packs.map((r) => r.name).join(', '), files, fixed };
+    }
+    if (info.kind === 'unknown') return { ok: false, kind: 'unknown', name: info.name };
+    if (info.kind === 'java-native') {
+      const destName = path.basename(src);
+      fs.copyFileSync(src, path.join(dir, destName)); // 1.8.9 reads it directly
+      return { ok: true, kind: 'java-native', name: destName };
+    }
+    const res = convertJavaPack(src, dir, (t, p) => send('game:' + t, p));
+    return { ok: true, kind: 'java-new', name: res.name, files: res.files, packFormat: res.packFormat };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
 
 let launching = false;
@@ -152,9 +235,10 @@ ipcMain.handle('game:launch', async (_e, opts) => {
     const refreshed = await microsoftRefresh(account.refreshToken);
     if (refreshed) {
       account = refreshed;
-      saveSettings(userData(), { account });
+      upsertAccount(userData(), account); // keep the switcher entry fresh too
     }
   }
+  discord.setPlaying(account.name); // Rich Presence: in game
   try {
     const code = await launch(
       {
@@ -181,5 +265,13 @@ ipcMain.handle('game:launch', async (_e, opts) => {
   } finally {
     launching = false;
     gameChild = null;
+    discord.setIdle(); // back to the idle presence when the game stops
   }
+});
+
+// Toggle Discord Rich Presence live from the settings screen.
+ipcMain.handle('discord:set', (_e, on) => {
+  saveSettings(userData(), { discordRpc: !!on });
+  if (on) discord.start(); else discord.stop();
+  return true;
 });

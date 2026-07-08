@@ -15,6 +15,27 @@ contextBridge.exposeInMainWorld('iea', {
   loginMicrosoft: () => ipcRenderer.invoke('auth:microsoft'),
   logout: () => ipcRenderer.invoke('auth:logout'),
 
+  // account switcher
+  listAccounts: () => ipcRenderer.invoke('accounts:list'),
+  selectAccount: (id) => ipcRenderer.invoke('accounts:select', id),
+  removeAccount: (id) => ipcRenderer.invoke('accounts:remove', id),
+
+  // player skin images (data URLs)
+  skinFace: (uuid) => ipcRenderer.invoke('skin:face', uuid),
+  skinBody: (uuid, model) => ipcRenderer.invoke('skin:body', uuid, model),
+  skinModel: (uuid) => ipcRenderer.invoke('skin:model', uuid),
+
+  // what's-new + app version + discord toggle
+  getNews: () => ipcRenderer.invoke('news:get'),
+  appVersion: () => ipcRenderer.invoke('app:version'),
+  setDiscord: (on) => ipcRenderer.invoke('discord:set', on),
+
+  // resource packs
+  importPack: () => ipcRenderer.invoke('packs:import'),
+  listPacks: () => ipcRenderer.invoke('packs:list'),
+  openPacksDir: () => ipcRenderer.invoke('packs:open'),
+  removePack: (name) => ipcRenderer.invoke('packs:remove', name),
+
   // launch
   launch: (opts) => ipcRenderer.invoke('game:launch', opts || {}),
   stop: () => ipcRenderer.invoke('game:stop'),

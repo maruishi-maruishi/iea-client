@@ -22,6 +22,7 @@
       <nav class="nav">
         <button class="nav-item active" data-tab="play"><span data-i18n="nav_play">Play</span></button>
         <button class="nav-item" data-tab="account"><span data-i18n="nav_account">Account</span></button>
+        <button class="nav-item" data-tab="packs"><span data-i18n="nav_packs">Resource packs</span></button>
         <button class="nav-item" data-tab="settings"><span data-i18n="nav_settings">Settings</span></button>
         <button class="nav-item" data-tab="logs"><span data-i18n="nav_logs">Logs</span></button>
       </nav>
@@ -43,6 +44,23 @@
           <h1>Minecraft <span class="accent">1.8.9</span></h1>
         </div>
 
+        <div class="play-top">
+          <div class="skin-card">
+            <img id="skinBody" class="skin-body" alt="" />
+            <div class="skin-name" id="skinName">—</div>
+            <div class="skin-type muted small" id="skinType"></div>
+          </div>
+          <div class="news-card">
+            <div class="news-head">
+              <span data-i18n="news_title">What's new</span>
+              <span class="news-version muted small" id="appVersion"></span>
+            </div>
+            <div id="newsList" class="news-list">
+              <div class="muted small" data-i18n="news_loading">Loading…</div>
+            </div>
+          </div>
+        </div>
+
         <div class="launch-area">
           <button id="launchBtn" class="launch-btn" data-i18n="btn_launch">LAUNCH</button>
           <div class="status" id="status"></div>
@@ -54,6 +72,13 @@
       <!-- ACCOUNT -->
       <section class="tab hidden" data-tab="account">
         <h2 data-i18n="acc_title">Account</h2>
+
+        <div class="field">
+          <label data-i18n="acc_saved_label">Saved accounts</label>
+          <div id="accountList" class="account-list"></div>
+          <p class="muted small" data-i18n="acc_saved_note">Click an account to make it active. Sign in below to add a new one.</p>
+        </div>
+
         <div class="field">
           <label data-i18n="acc_offline_label">Offline username</label>
           <div class="row">
@@ -105,6 +130,14 @@
         </div>
 
         <div class="field">
+          <label class="check-row">
+            <input id="discordRpc" type="checkbox" />
+            <span data-i18n="set_discord_label">Discord Rich Presence</span>
+          </label>
+          <p class="muted small" data-i18n="set_discord_note">Shows "Playing IEA Client" on your Discord profile. Needs the Discord desktop app running.</p>
+        </div>
+
+        <div class="field">
           <label data-i18n="set_hypixel_label">Hypixel API key (for LevelHead)</label>
           <input id="hypixelKey" type="password" data-i18n-ph="set_hypixel_ph" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
           <p class="muted small" data-i18n="set_hypixel_note">Create one at developer.hypixel.net. Saved to iea-hypixel-key.txt on launch.</p>
@@ -135,6 +168,25 @@
 
         <button id="saveSettingsBtn" class="btn btn-primary" data-i18n="set_save">Save settings</button>
         <span id="savedHint" class="muted small hidden" data-i18n="set_saved">Saved ✓</span>
+      </section>
+
+      <!-- RESOURCE PACKS -->
+      <section class="tab hidden" data-tab="packs">
+        <h2 data-i18n="packs_title">Resource packs</h2>
+        <p class="muted small" data-i18n="packs_note">Import a newer Java pack (1.9–1.21) and it's auto-converted to 1.8.9. Textures for common blocks/items/GUI are remapped; custom models and Bedrock packs aren't supported (yet).</p>
+        <p class="pack-warn small" data-i18n="packs_warn">⚠ This conversion is experimental. Some textures may not display correctly depending on the pack.</p>
+
+        <div class="row" style="margin: 16px 0;">
+          <button id="importPackBtn" class="btn btn-primary" data-i18n="packs_import">Import pack…</button>
+          <button id="openPacksBtn" class="btn btn-ghost" data-i18n="packs_open">Open folder</button>
+        </div>
+        <div id="packStatus" class="pack-status small"></div>
+
+        <div class="field" style="margin-top: 18px;">
+          <label data-i18n="packs_installed">Installed packs</label>
+          <div id="packList" class="account-list"></div>
+        </div>
+        <p class="muted small" data-i18n="packs_select_note">Select it in-game under Options → Resource Packs.</p>
       </section>
 
       <!-- LOGS -->
