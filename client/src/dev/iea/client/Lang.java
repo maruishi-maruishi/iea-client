@@ -18,6 +18,23 @@ public final class Lang {
         put("cat_input", "入力", "Input");
         put("cat_render", "描画", "Render");
         put("cat_player", "プレイヤー", "Player");
+        put("cat_chat", "チャット", "Chat");
+        // sidebar nav
+        put("nav_mods", "モジュール", "Modules");
+        put("nav_theme", "テーマ", "Theme");
+        put("nav_settings", "設定", "Settings");
+        put("set_theme_on", "テーマを使う", "Enable theme");
+        // settings tab
+        put("set_language", "言語", "Language");
+        put("set_ieafont", "IEAフォント", "IEA Font");
+        put("set_ieagui", "IEAメニュー装飾", "IEA Menus");
+        put("set_dynfps", "Dynamic FPS (非集中時に軽量化)", "Dynamic FPS (idle throttle)");
+        // per-module page
+        put("cfg_bind", "トグルキー", "Toggle key");
+        put("cfg_none", "なし", "None");
+        put("cfg_customcolor", "個別カラー", "Custom colour");
+        put("d.dynfps", "ウィンドウが非アクティブ(他アプリ使用中)のとき約30fpsに制限してCPU/GPU負荷と発熱を抑えます。プレイ中は影響ありません。",
+                "Caps the loop to ~30fps while the window is unfocused (other apps), cutting CPU/GPU load and heat. No effect while playing.");
         put("enabled", "有効", "Enabled");
         put("category", "カテゴリ", "Category");
         put("reset_pos", "この表示の位置をリセット", "Reset position");
@@ -27,6 +44,7 @@ public final class Lang {
         put("on", "オン", "ON");
         put("off", "オフ", "OFF");
         put("hud_hint", "ドラッグで移動  /  右Shiftで完了", "drag to move  /  Right Shift to finish");
+        put("hud_demo", "サンプル表示(実際の値ではありません)", "Sample preview (not your real stats)");
         put("note_pos", "HUDの位置は「HUD編集」からドラッグで移動できます。",
                 "Drag items in Edit HUD to move them.");
         // setting names

@@ -1,29 +1,42 @@
 {
   "name": "iea-client",
   "productName": "IEA Client",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A Minecraft 1.8.9 PvP client launcher (Lunar-style)",
   "main": "src/main/index.js",
   "author": "marui",
   "license": "MIT",
   "scripts": {
-    "start": "electron .",
+    "start": "npm run renderer:build && electron .",
+    "renderer:dev": "vite",
+    "renderer:build": "vite build",
     "icons": "node scripts/make-icons.js",
     "client:build": "node client/build.mjs",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:all": "electron-builder -mw"
+    "dist:win": "npm run renderer:build && electron-builder --win",
+    "dist:mac": "npm run renderer:build && electron-builder --mac",
+    "dist:all": "npm run renderer:build && electron-builder -mw"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.4",
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
-    "png2icons": "^2.0.1"
+    "lucide-react": "^0.546.0",
+    "png2icons": "^2.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.1.14",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.3"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
     "discord-rpc": "^4.0.1",
     "electron-updater": "^6.8.9",
+    "iconv-lite": "^0.7.3",
     "msmc": "^5.0.5"
   },
   "build": {
@@ -43,7 +56,10 @@
       "buildResources": "build"
     },
     "files": [
-      "src/**/*",
+      "src/main/**/*",
+      "src/preload/**/*",
+      "src/renderer/assets/**/*",
+      "renderer-dist/**/*",
       "package.json"
     ],
     "extraResources": [

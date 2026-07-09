@@ -27,6 +27,10 @@ public final class HudManager {
     private float dragOffX, dragOffY;
     private final long startTime = System.currentTimeMillis();
 
+    // HUD-edit preview: fill data-driven elements with sample values so their layout is
+    // clear regardless of the current game state (and obviously not your real stats).
+    public static boolean demo = false;
+
     private static final String[] NAMES =
             { "Watermark", "FPS", "CPS", "Clock", "Memory", "ArrayList", "SessionTimer",
               "Keystrokes", "MouseStrokes", "Crosshair",
@@ -169,21 +173,21 @@ public final class HudManager {
             drawCrosshair(e, (int) m.num("type", 0), m.num("size", 1f));
         } else if (e.name.equals("Reach")) {
             float r = Hook.lastReach;
-            text(e, font, r < 0 ? "Reach -.--" : String.format("Reach %.2f m", r), Theme.TEXT);
+            text(e, font, demo ? "Reach 3.14 m" : (r < 0 ? "Reach -.--" : String.format("Reach %.2f m", r)), Theme.TEXT);
         } else if (e.name.equals("Coordinates")) {
-            text(e, font, coordsText(), Theme.TEXT);
+            text(e, font, demo ? "X 128  Y 64  Z -512  NE" : coordsText(), Theme.TEXT);
         } else if (e.name.equals("Ping")) {
             int ms = Mc.pingMs();
-            text(e, font, ms < 0 ? "Ping --" : "Ping " + ms + " ms", Theme.TEXT);
+            text(e, font, demo ? "Ping 23 ms" : (ms < 0 ? "Ping --" : "Ping " + ms + " ms"), Theme.TEXT);
         } else if (e.name.equals("PotionHUD")) {
             drawPotions(e, font);
         } else if (e.name.equals("ArmorStatus")) {
             drawArmor(e, font);
         } else if (e.name.equals("ComboCounter")) {
-            int c = Hook.combo();
+            int c = demo ? 5 : Hook.combo();
             text(e, font, c + (c == 1 ? " Hit" : " Hits"), c > 0 ? Theme.TEXT : Theme.MUTED);
         } else if (e.name.equals("ServerAddress")) {
-            String addr = Mc.serverAddress();
+            String addr = demo ? "play.example.net" : Mc.serverAddress();
             text(e, font, addr == null ? "Singleplayer" : addr, Theme.TEXT);
         }
     }
@@ -197,13 +201,16 @@ public final class HudManager {
         float lim = box / 2f - 7;
         float dx = clamp(Hook.moveX() * 0.5f, -lim, lim);
         float dy = clamp(Hook.moveY() * 0.5f, -lim, lim);
+        Module mm = Modules.get("MouseStrokes");
+        int acc = mm != null ? mm.accent() : Theme.ACCENT;
+        int a33 = (0x33 << 24) | (acc & 0xFFFFFF), a66 = (0x66 << 24) | (acc & 0xFFFFFF);
         // faint centre guides
-        Gl.rect(cx - 0.5f, e.y + 5, 1, box - 10, Theme.accentA(0x33));
-        Gl.rect(e.x + 5, cy - 0.5f, box - 10, 1, Theme.accentA(0x33));
+        Gl.rect(cx - 0.5f, e.y + 5, 1, box - 10, a33);
+        Gl.rect(e.x + 5, cy - 0.5f, box - 10, 1, a33);
         // moving dot + a line from centre
-        Gl.rect(cx, cy, dx, 1.5f, Theme.accentA(0x66));
-        Gl.rect(cx, cy, 1.5f, dy, Theme.accentA(0x66));
-        Gl.roundedRect(cx + dx - 4, cy + dy - 4, 8, 8, 4, Theme.ACCENT);
+        Gl.rect(cx, cy, dx, 1.5f, a66);
+        Gl.rect(cx, cy, 1.5f, dy, a66);
+        Gl.roundedRect(cx + dx - 4, cy + dy - 4, 8, 8, 4, acc);
     }
 
     private void drawCrosshair(HudElement e, int type, float k) {
@@ -275,7 +282,7 @@ public final class HudManager {
         List<String> names = new ArrayList<String>();
         for (int i = 0; i < Modules.ALL.size(); i++) {
             Module m = Modules.ALL.get(i);
-            if (m.enabled) names.add(m.name);
+            if (m.enabled && !m.hidden) names.add(m.name); // hide client-wide settings
         }
         final Font f = font;
         Collections.sort(names, new Comparator<String>() {
@@ -289,7 +296,9 @@ public final class HudManager {
             float bw = font.getWidth(n) + 16, bh = font.getHeight() + 6;
             float bx = (e.ax == HudElement.RIGHT) ? e.x + maxW - bw : e.x;
             if (bg) card(bx, y, bw, bh);
-            font.draw(n, bx + 8, y + 3, Theme.TEXT);
+            // per-module custom colour shows here; others stay the calm default text colour
+            Module rm = Modules.get(n);
+            font.draw(n, bx + 8, y + 3, (rm != null && rm.customColor) ? rm.accent() : Theme.TEXT);
             y += bh + 3;
         }
         e.w = Math.max(1, maxW); e.h = Math.max(1, y - e.y - 3);
@@ -301,31 +310,33 @@ public final class HudManager {
         float h = 2 * s + g;
         if (showSpace) h += g + 14;
         if (showMouse) h += g + 18;
+        Module km = Modules.get("Keystrokes");
+        int a2 = km != null ? km.accent2() : Theme.ACCENT2;
         // no surrounding panel — just the key tiles float on a transparent background
         float ox = e.x, oy = e.y;
-        key(font, "W", ox + s + g, oy, s, Keyboard.isKeyDown(Keyboard.KEY_W));
-        key(font, "A", ox, oy + s + g, s, Keyboard.isKeyDown(Keyboard.KEY_A));
-        key(font, "S", ox + s + g, oy + s + g, s, Keyboard.isKeyDown(Keyboard.KEY_S));
-        key(font, "D", ox + (s + g) * 2, oy + s + g, s, Keyboard.isKeyDown(Keyboard.KEY_D));
+        key(font, "W", ox + s + g, oy, s, Keyboard.isKeyDown(Keyboard.KEY_W), a2);
+        key(font, "A", ox, oy + s + g, s, Keyboard.isKeyDown(Keyboard.KEY_A), a2);
+        key(font, "S", ox + s + g, oy + s + g, s, Keyboard.isKeyDown(Keyboard.KEY_S), a2);
+        key(font, "D", ox + (s + g) * 2, oy + s + g, s, Keyboard.isKeyDown(Keyboard.KEY_D), a2);
         float ry = oy + (s + g) * 2;
         if (showSpace) {
             boolean space = Keyboard.isKeyDown(Keyboard.KEY_SPACE);
-            Gl.roundedRect(ox, ry, w, 14, 4, space ? Theme.ACCENT2 : KEY_IDLE);
+            Gl.roundedRect(ox, ry, w, 14, 4, space ? a2 : KEY_IDLE);
             ry += 14 + g;
         }
         if (showMouse) {
             float half = (w - g) / 2f;
             boolean lb = Mouse.isButtonDown(0), rb = Mouse.isButtonDown(1);
-            Gl.roundedRect(ox, ry, half, 18, 4, lb ? Theme.ACCENT2 : KEY_IDLE);
+            Gl.roundedRect(ox, ry, half, 18, 4, lb ? a2 : KEY_IDLE);
             font.drawCentered("L", ox + half / 2f, ry + 9, lb ? Theme.DARK : Theme.TEXT);
-            Gl.roundedRect(ox + half + g, ry, half, 18, 4, rb ? Theme.ACCENT2 : KEY_IDLE);
+            Gl.roundedRect(ox + half + g, ry, half, 18, 4, rb ? a2 : KEY_IDLE);
             font.drawCentered("R", ox + half + g + half / 2f, ry + 9, rb ? Theme.DARK : Theme.TEXT);
         }
         e.w = w; e.h = h;
     }
 
-    private void key(Font font, String c, float x, float y, float s, boolean down) {
-        Gl.roundedRect(x, y, s, s, 6, down ? Theme.ACCENT2 : KEY_IDLE);
+    private void key(Font font, String c, float x, float y, float s, boolean down, int a2) {
+        Gl.roundedRect(x, y, s, s, 6, down ? a2 : KEY_IDLE);
         font.drawCentered(c, x + s / 2f, y + s / 2f, down ? Theme.DARK : Theme.TEXT);
     }
 
@@ -402,6 +413,12 @@ public final class HudManager {
 
     private void drawPotions(HudElement e, Font font) {
         List<int[]> fx = Mc.potions();
+        if (demo) { // sample effects so the layout is visible while editing
+            fx = new ArrayList<int[]>();
+            fx.add(new int[] { 1, 1680, 1 });  // Speed II  1:24
+            fx.add(new int[] { 5, 900, 0 });   // Strength  0:45
+            fx.add(new int[] { 11, 3600, 0 }); // Resistance 3:00
+        }
         if (fx.isEmpty()) { e.w = 110; e.h = font.getHeight() + 16; return; } // outline only in edit
         float pad = 6, icon = 18, lh = icon + 4;
         List<String> lines = new ArrayList<String>();
@@ -459,6 +476,7 @@ public final class HudManager {
     // queued for the deferred stage (vanilla RenderItem must run OUTSIDE our raw
     // push/pop-attrib pass or GlStateManager's cache desyncs and corrupts rendering).
     private void drawArmor(HudElement e, Font font) {
+        if (demo) { drawArmorDemo(e, font); return; } // sample armor while editing
         List<Object[]> rows = Mc.armorItems();
         if (rows.isEmpty()) { e.w = 96; e.h = font.getHeight() + 16; return; } // outline only in edit
         Module m = Modules.get(e.name);
@@ -512,9 +530,61 @@ public final class HudManager {
     private static int armorColor(int[] d) {
         if (d[1] >= 0 && d[2] > 0) {
             int pct = d[1] * 100 / d[2];
-            return pct > 50 ? Theme.ACCENT : (pct > 25 ? 0xFFE6C235 : 0xFFE65050);
+            return armorColorPct(pct);
         }
         return Theme.TEXT;
+    }
+
+    private static int armorColorPct(int pct) {
+        Module am = Modules.get("ArmorStatus");
+        int good = am != null ? am.accent() : Theme.ACCENT;
+        return pct > 50 ? good : (pct > 25 ? 0xFFE6C235 : 0xFFE65050);
+    }
+
+    // Sample armor (4 pieces) for the HUD-edit preview: placeholder icon squares + sample
+    // durability numbers, honouring the horizontal/scale settings like the real one.
+    private void drawArmorDemo(HudElement e, Font font) {
+        Module m = Modules.get(e.name);
+        boolean horiz = m != null && m.bool("horizontal");
+        int[] dura = { 342, 168, 91, 24 };
+        int[] pct = { 94, 70, 40, 12 };
+        float pad = 6, icon = 18;
+        if (horiz) {
+            float fh = font.getHeight();
+            float[] cellW = new float[dura.length];
+            float bw = pad;
+            for (int i = 0; i < dura.length; i++) {
+                cellW[i] = Math.max(icon, font.getWidth(String.valueOf(dura[i])));
+                bw += cellW[i] + (i < dura.length - 1 ? 8 : 0);
+            }
+            bw += pad;
+            float bh = pad * 2 + icon + 2 + fh;
+            card(e.x, e.y, bw, bh);
+            float x = e.x + pad, y = e.y + pad;
+            for (int i = 0; i < dura.length; i++) {
+                armorIconStub(x + (cellW[i] - icon) / 2f, y, icon);
+                font.drawCentered(String.valueOf(dura[i]), x + cellW[i] / 2f, y + icon + 2 + fh / 2f, armorColorPct(pct[i]));
+                x += cellW[i] + 8;
+            }
+            e.w = bw; e.h = bh;
+        } else {
+            float lh = icon + 4, txtW = 0;
+            for (int v : dura) txtW = Math.max(txtW, font.getWidth(String.valueOf(v)));
+            float bw = pad + icon + 8 + txtW + pad, bh = dura.length * lh + pad * 2 - 4;
+            card(e.x, e.y, bw, bh);
+            float y = e.y + pad;
+            for (int i = 0; i < dura.length; i++) {
+                font.draw(String.valueOf(dura[i]), e.x + pad + icon + 8, y + (icon - font.getHeight()) / 2f, armorColorPct(pct[i]));
+                armorIconStub(e.x + pad, y, icon);
+                y += lh;
+            }
+            e.w = bw; e.h = bh;
+        }
+    }
+
+    private void armorIconStub(float x, float y, float s) {
+        Gl.roundedRect(x, y, s, s, 3, 0x55FFFFFF);
+        Gl.roundedOutline(x, y, s, s, 3, 1, 0x33FFFFFF);
     }
 
     // map local coords through the element's scale-about-(e.x,e.y) transform to screen

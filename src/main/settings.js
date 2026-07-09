@@ -19,6 +19,7 @@ const DEFAULTS = {
   account: null,       // the ACTIVE account (offline or microsoft) used to launch
   accounts: [],        // all saved accounts, for the account switcher
   discordRpc: true,    // show Discord Rich Presence while the launcher/game is open
+  servers: [],         // saved servers for the Servers tab: [{ id, name, address }]
 };
 
 // Stable id for an account (one entry per type+uuid).

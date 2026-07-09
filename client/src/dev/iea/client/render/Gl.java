@@ -192,6 +192,19 @@ public final class Gl {
         GL11.glColor4f(1f, 1f, 1f, 1f);
     }
 
+    /** Faint geometric grid (mirrors the launcher's .geometric-grid backdrop: 24px cells,
+     *  thin #262a36 lines). Draw over a dim fill for the same look inside the game. */
+    public static void grid(float x, float y, float w, float h, float cell, int argb) {
+        GL11.glDisable(GL11.GL_TEXTURE_2D);
+        color(argb);
+        GL11.glLineWidth(1f);
+        GL11.glBegin(GL11.GL_LINES);
+        for (float gx = x; gx <= x + w + 0.5f; gx += cell) { GL11.glVertex2f(gx, y); GL11.glVertex2f(gx, y + h); }
+        for (float gy = y; gy <= y + h + 0.5f; gy += cell) { GL11.glVertex2f(x, gy); GL11.glVertex2f(x + w, gy); }
+        GL11.glEnd();
+        GL11.glColor4f(1f, 1f, 1f, 1f);
+    }
+
     public static void tri(float x1, float y1, float x2, float y2, float x3, float y3, int argb) {
         GL11.glDisable(GL11.GL_TEXTURE_2D);
         color(argb);

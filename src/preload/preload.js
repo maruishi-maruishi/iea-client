@@ -35,6 +35,19 @@ contextBridge.exposeInMainWorld('iea', {
   listPacks: () => ipcRenderer.invoke('packs:list'),
   openPacksDir: () => ipcRenderer.invoke('packs:open'),
   removePack: (name) => ipcRenderer.invoke('packs:remove', name),
+  packIcon: (name) => ipcRenderer.invoke('packs:icon', name),
+  togglePack: (name, on) => ipcRenderer.invoke('packs:toggle', name, on),
+
+  // saved servers + live ping
+  listServers: () => ipcRenderer.invoke('servers:list'),
+  addServer: (name, address) => ipcRenderer.invoke('servers:add', name, address),
+  removeServer: (id) => ipcRenderer.invoke('servers:remove', id),
+  pingServer: (address) => ipcRenderer.invoke('servers:ping', address),
+
+  // frameless window controls
+  winMinimize: () => ipcRenderer.send('win:minimize'),
+  winMaximize: () => ipcRenderer.send('win:maximize'),
+  winClose: () => ipcRenderer.send('win:close'),
 
   // launch
   launch: (opts) => ipcRenderer.invoke('game:launch', opts || {}),

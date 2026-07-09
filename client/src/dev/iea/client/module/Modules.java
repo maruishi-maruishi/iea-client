@@ -144,20 +144,26 @@ public final class Modules {
                 .add(new Setting("amount", "s.saturation", 1f, 0f, 2f, 0.05f));
         // static FOV: drops the sprint/speed/bow FOV zoom (world stays a fixed FOV)
         add("NoFov", "Render", false).desc("d.nofov");
-        // user-changeable UI accent colour (RGB); defaults to the stock lime
-        add("Theme", "Render", true).desc("d.theme")
-                .add(new Setting("r", "s.red", 157, 0, 255, 1))
-                .add(new Setting("g", "s.green", 194, 0, 255, 1))
-                .add(new Setting("b", "s.blue", 79, 0, 255, 1));
+        // user-changeable UI accent colour (RGB); defaults to the stock lime. Hidden from the
+        // grid — edited from the dedicated Theme tab in the ClickGui.
+        add("Theme", "Render", true).desc("d.theme").hide()
+                .add(new Setting("r", "s.red", 163, 0, 255, 1))
+                .add(new Setting("g", "s.green", 230, 0, 255, 1))
+                .add(new Setting("b", "s.blue", 53, 0, 255, 1));
+        // Dynamic FPS: cap the loop to ~30fps while the window is unfocused. Hidden client
+        // setting (Settings tab), not a gameplay module.
+        add("DynamicFps", "Render", true).desc("d.dynfps").hide();
         // replace the vanilla font everywhere (FontRenderer hooks) AND the client's own
-        // GUI/HUD text — one toggle swaps the font for the game and the UI together
-        add("IEAFont", "Render", true).desc("d.ieafont");
+        // GUI/HUD text — one toggle swaps the font for the game and the UI together. Hidden
+        // (Settings tab): it's a client-wide preference, not a gameplay module.
+        add("IEAFont", "Render", true).desc("d.ieafont").hide();
         // NOTE: CustomSky is NOT a module — it's a built-in feature that applies a resource
         // pack's custom sky automatically (like OptiFine/Lunar). The RenderGlobal.renderSky
         // hook stays in place; Hook.customSkyOn() activates it only when sky data is loaded.
         // restyle vanilla GUI screens: title-menu skin + ClickGui-style buttons.
         // default ON (preserves the original always-on behaviour); off = vanilla look.
-        add("IEAGui", "Render", true).desc("d.ieagui");
+        // Hidden (Settings tab): a client-wide preference, not a gameplay module.
+        add("IEAGui", "Render", true).desc("d.ieagui").hide();
         // IEA-styled hotbar (GuiIngame.renderHotbar replacement)
         add("Hotbar", "Render", false).desc("d.hotbar")
                 .add(new Setting("smooth", "s.smoothsel", true))

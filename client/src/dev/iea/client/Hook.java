@@ -754,8 +754,14 @@ public final class Hook {
     // sprites from icons.png (texture rows v=0 hearts, v=9 armor, v=27 food) while the
     // stat-bars option replaces them. Air bubbles (v=18) are kept.
     private static long lastStatIconNs = 0;
+    // set true only while we run a slider's vanilla mouseDragged (which both updates the
+    // value AND draws the widgets.png knob) — so we keep the update but skip the vanilla
+    // knob and paint our own themed one over the exact same spot.
+    public static boolean suppressKnob = false;
     public static boolean filterStatIcon(int tx, int ty, int w, int h) {
         try {
+            // vanilla slider knob halves: drawTexturedModalRect(x, y, 0|196, 66, 4, 20)
+            if (suppressKnob && ty == 66 && w == 4 && h == 20) return true;
             if (w != 9 || h != 9) return false;
             if (ty != 0 && ty != 9 && ty != 27) return false;
             if (tx < 16 || tx > 169) return false;
@@ -921,15 +927,21 @@ public final class Hook {
                 GL11.glEnable(GL11.GL_BLEND);
                 GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
                 Gl.alpha = 1f;
-                // solid dark background — the same colour as the startup splash behind the
-                // IEA logo, so the menu matches the launch screen instead of cobblestone
-                Gl.rect(0, 0, w, h, 0xFF0E1116);
+                // launcher backdrop: deep #06070a base + the faint geometric grid, so the
+                // menu matches the launcher window instead of a flat panel / cobblestone
+                Gl.rect(0, 0, w, h, Theme.DEEP);
+                Gl.grid(0, 0, w, h, 24, Theme.GRID);
                 if (logo == null) { logo = new Logo(); logo.init(128); }
                 float size = Math.max(56f, Math.min(h * 0.26f, 100f));
                 logo.draw(w / 2f - size / 2f, h * 0.07f, size);
             } finally {
                 GL11.glPopAttrib();
             }
+            // Footer wordmark: drawn AFTER the attrib block through the vanilla text path
+            // (drawVanillaLabel), exactly like the restyled buttons. Drawing our own IEA-font
+            // quads here would leave the font atlas bound and desync GlStateManager, garbling
+            // the button labels that super.drawScreen paints next.
+            drawVanillaLabel("Minecraft 1.8.9   ·   IEA CLIENT", w / 2f, h - 12f, Theme.MUTED);
         } catch (Throwable ignored) { }
     }
 
@@ -970,8 +982,30 @@ public final class Hook {
             }
 
             // slider knob + drag (vanilla mouseDragged; uses GlStateManager, so call it
-            // OUTSIDE our push/pop). No-op for plain buttons. Drawn under our label.
+            // OUTSIDE our push/pop). No-op for plain buttons. This also updates the value
+            // while dragging; we suppress its widgets.png knob (suppressKnob -> filterStatIcon)
+            // and paint our own themed knob over the exact same spot just below.
+            suppressKnob = true;
             Mc.callMouseDragged(btn, mc, mx, my);
+            suppressKnob = false;
+
+            float sliderVal = Mc.btnSliderValue(btn); // >= 0 only for sliders (e.g. volume/FOV)
+            if (sliderVal >= 0f) {
+                GL11.glPushAttrib(GL11.GL_ENABLE_BIT | GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT);
+                try {
+                    GL11.glDisable(GL11.GL_DEPTH_TEST);
+                    GL11.glDisable(GL11.GL_CULL_FACE);
+                    GL11.glEnable(GL11.GL_BLEND);
+                    GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+                    Gl.alpha = 1f;
+                    float kc = x + sliderVal * (w - 8) + 4, kw = 8; // vanilla knob footprint
+                    int knob = !enabled ? Theme.MUTED : (hov ? Theme.ACCENT : Theme.ACCENT2);
+                    Gl.roundedRect(kc - kw / 2f, y + 3, kw, h - 6, 3f, knob);
+                    Gl.roundedOutline(kc - kw / 2f, y + 3, kw, h - 6, 3f, 1f, Theme.accentA(0x99));
+                } finally {
+                    GL11.glPopAttrib();
+                }
+            }
 
             // NB: push only ENABLE/COLOR bits, NOT GL_TEXTURE_BIT. The vanilla FontRenderer
             // (IEAFont off) binds the font texture via GlStateManager; if glPopAttrib
@@ -1022,15 +1056,31 @@ public final class Hook {
         } catch (Throwable ignored) { }
     }
 
-    // Dynamic FPS: while the game window is unfocused (ALT+TAB / other apps), cap
-    // the loop to ~30 fps to cut GPU/CPU load and heat. Zero effect while playing.
-    public static boolean dynamicFps = true;
+    // Dynamic FPS (the "DynamicFps" client setting): while the game window is unfocused
+    // (ALT+TAB / other apps), cap the loop to ~30 fps to cut GPU/CPU load and heat. Zero
+    // effect while playing.
     private static final long UNFOCUSED_FRAME_MS = 33L;
+
+    // Per-module toggle keybinds: edge-detected key -> flip that module's enabled flag.
+    private static final java.util.HashMap<String, Boolean> bindPrev = new java.util.HashMap<String, Boolean>();
+    private static void updateBinds() {
+        // ignore while the menu is open (binding a key there) or while typing in chat
+        boolean block = isGuiOpen() || Mc.isChatOpen();
+        for (int i = 0; i < Modules.ALL.size(); i++) {
+            Module m = Modules.ALL.get(i);
+            int k = m.toggleKey;
+            if (k <= 0) { if (!bindPrev.isEmpty()) bindPrev.remove(m.name); continue; }
+            boolean down = !block && Keyboard.isKeyDown(k);
+            Boolean prev = bindPrev.get(m.name);
+            if (down && (prev == null || !prev.booleanValue())) m.enabled = !m.enabled;
+            bindPrev.put(m.name, Boolean.valueOf(down));
+        }
+    }
 
     public static void onFrame() {
         try {
             Mc.observeView(); // identify thirdPersonView + RenderManager pitch field over time
-            if (inited && dynamicFps && !Display.isActive()) {
+            if (inited && Modules.on("DynamicFps") && !Display.isActive()) {
                 try { Thread.sleep(UNFOCUSED_FRAME_MS); } catch (InterruptedException ignored) { }
             }
             if (!inited) {
@@ -1062,8 +1112,8 @@ public final class Hook {
             // apply the user's theme accent colour (or revert to the stock lime when off)
             Module themeM = Modules.get("Theme");
             if (themeM != null && themeM.enabled) {
-                int r = clampByte(themeM.num("r", 157)), g = clampByte(themeM.num("g", 194)),
-                    b = clampByte(themeM.num("b", 79));
+                int r = clampByte(themeM.num("r", 163)), g = clampByte(themeM.num("g", 230)),
+                    b = clampByte(themeM.num("b", 53));
                 Theme.setAccent((r << 16) | (g << 8) | b);
             } else {
                 Theme.setAccent(Theme.DEFAULT_ACCENT);
@@ -1082,6 +1132,7 @@ public final class Hook {
 
             Mc.tryDiscover(); // locate Minecraft / GameSettings (mapping bootstrap)
             applyGameFeatures();
+            updateBinds();      // per-module toggle keybinds
             updateSwingSpeed(); // SwingSpeed: drive the swing counter faster
             DeathAlert.tick();  // Bedwars: poll chat for teammate deaths
 

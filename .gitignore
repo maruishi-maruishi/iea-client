@@ -8,3 +8,6 @@ Thumbs.db
 # Java client build artifacts (regenerated in CI/dev with: npm run client:build)
 client/libs/
 client/build/
+
+# Renderer build output (regenerated in CI/dev with: npm run renderer:build)
+renderer-dist/

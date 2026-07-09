@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* System fonts only (Electron CSP / offline: no remote Google Fonts). */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+  --font-display: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+}
+
+/* Electron frameless: draggable title bar + non-drag interactive elements. */
+.app-drag { -webkit-app-region: drag; }
+.app-no-drag { -webkit-app-region: no-drag; }
+
+/* Small fade-in used across tabs. */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.animate-fadeIn { animation: fadeIn 0.25s ease-out; }
+
+html, body, #root { height: 100%; margin: 0; }
+body { overflow: hidden; }
+
+/* Custom Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #262a36 #0e0f14;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0e0f14; }
+::-webkit-scrollbar-thumb { background: #262a36; border-radius: 9999px; border: 1px solid #0e0f14; }
+::-webkit-scrollbar-thumb:hover { background: #a3e635; }
+
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: #262a36 #0e0f14; }
+.scrollbar-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: #0e0f14; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #262a36; border-radius: 9999px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #a3e635; }
+
+/* Geometric Grid Background */
+.geometric-grid {
+  background-size: 24px 24px;
+  background-image:
+    linear-gradient(to right, rgba(38, 42, 54, 0.45) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(38, 42, 54, 0.45) 1px, transparent 1px);
+}

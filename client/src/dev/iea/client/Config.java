@@ -34,6 +34,10 @@ public final class Config {
             Module m = Modules.ALL.get(i);
             String v = p.getProperty("module." + m.name);
             if (v != null) m.enabled = Boolean.parseBoolean(v);
+            m.toggleKey = (int) getF(p, "bind." + m.name, m.toggleKey);
+            String cc = p.getProperty("color." + m.name + ".on");
+            if (cc != null) m.customColor = Boolean.parseBoolean(cc);
+            m.color = (int) getF(p, "color." + m.name + ".rgb", m.color);
             for (int j = 0; j < m.settings.size(); j++) {
                 Setting s = m.settings.get(j);
                 String k = "set." + m.name + "." + s.key;
@@ -63,6 +67,9 @@ public final class Config {
         for (int i = 0; i < Modules.ALL.size(); i++) {
             Module m = Modules.ALL.get(i);
             p.setProperty("module." + m.name, String.valueOf(m.enabled));
+            p.setProperty("bind." + m.name, String.valueOf(m.toggleKey));
+            p.setProperty("color." + m.name + ".on", String.valueOf(m.customColor));
+            p.setProperty("color." + m.name + ".rgb", String.valueOf(m.color));
             for (int j = 0; j < m.settings.size(); j++) {
                 Setting s = m.settings.get(j);
                 String k = "set." + m.name + "." + s.key;

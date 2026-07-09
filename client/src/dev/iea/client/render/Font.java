@@ -193,6 +193,17 @@ public final class Font {
         return g;
     }
 
+    /** Left-aligned at x, vertically centred on cy — correct in BOTH the IEA and the vanilla
+     *  font modes (plain draw() is top-left based and, in vanilla mode, sits low). Use this
+     *  for row/tab/nav labels that need to sit centred in a box. */
+    public void drawVMid(String s, float x, float cy, int argb) {
+        if (vanilla != null && vanilla.active()) {
+            drawVanilla(s, x, cy - getInkHeight() / 2f, argb); // centre the vanilla ink on cy
+            return;
+        }
+        draw(s, x, cy - vCenter / SS, argb); // centre the glyph body (same math as drawCentered)
+    }
+
     /** Centered on (cx, cy), using measured ink bounds for true vertical centering. */
     public void drawCentered(String s, float cx, float cy, int argb) {
         if (vanilla != null && vanilla.active()) {

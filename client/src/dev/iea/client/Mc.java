@@ -2023,6 +2023,7 @@ public final class Mc {
     // xPosition, yPosition (ints), displayString (String), id (int), enabled, visible,
     // hovered (booleans).
     private static boolean btnResolved;
+    private static Class<?> btnClass; // resolved GuiButton class (base for slider detection)
     private static Field bX, bY, bW, bH, bEnabled, bVisible, bHovered, bText;
     private static Method mouseDraggedM; // GuiButton.mouseDragged(Minecraft,int,int) (protected)
     private static void resolveButton(Object b) {
@@ -2042,6 +2043,7 @@ public final class Mc {
                 if (ni >= 4 && ns >= 1 && nb >= 3) { gb = c; break; }
             }
             if (gb == null) { System.out.println("[IEA] GuiButton fields not found"); return; }
+            btnClass = gb;
             // mouseDragged = the PROTECTED (Minecraft,int,int)->void on GuiButton
             // (drawButton has the same descriptor but is public). Invoking it virtually
             // runs a slider subclass's override (knob + drag).
@@ -2134,22 +2136,44 @@ public final class Mc {
         catch (Throwable t) { return null; }
     }
 
-    // A slider is any GuiButton subclass carrying a 0..1 float (e.g. sliderValue). The
-    // GuiButton base (avs) has no float field, so the first float in the hierarchy is it.
-    public static float btnSliderValue(Object b) {
+    // A slider is a GuiButton subclass that OVERRIDES mouseDragged (that's where the knob
+    // draws + the drag updates). Detecting by an override — not by "has a float" — avoids
+    // false positives: every GuiButton inherits Gui.zLevel (a float), so a field scan flags
+    // ALL buttons as sliders.
+    public static boolean btnIsSlider(Object b) {
+        resolveButton(b);
+        if (mouseDraggedM == null || btnClass == null) return false;
+        String name = mouseDraggedM.getName();
+        Class<?>[] params = mouseDraggedM.getParameterTypes();
         try {
-            for (Class<?> c = b.getClass(); c != null; c = c.getSuperclass()) {
+            for (Class<?> c = b.getClass(); c != null && c != btnClass; c = c.getSuperclass()) {
+                for (Method m : c.getDeclaredMethods()) {
+                    if (m.getName().equals(name)
+                            && java.util.Arrays.equals(m.getParameterTypes(), params)) return true;
+                }
+            }
+        } catch (Throwable ignored) { }
+        return false;
+    }
+
+    // The slider's 0..1 value: the first float/double field declared BELOW GuiButton (so we
+    // never pick up Gui.zLevel, which lives above it). Only meaningful for real sliders.
+    public static float btnSliderValue(Object b) {
+        if (!btnIsSlider(b)) return -1f;
+        try {
+            for (Class<?> c = b.getClass(); c != null && c != btnClass; c = c.getSuperclass()) {
                 for (Field f : c.getDeclaredFields()) {
                     if (Modifier.isStatic(f.getModifiers())) continue;
-                    if (f.getType() == float.class) {
+                    Class<?> t = f.getType();
+                    if (t == float.class || t == double.class) {
                         f.setAccessible(true);
-                        float v = f.getFloat(b);
-                        return v < 0f ? 0f : (v > 1f ? 1f : v);
+                        double v = (t == float.class) ? f.getFloat(b) : f.getDouble(b);
+                        return v < 0 ? 0f : (v > 1 ? 1f : (float) v);
                     }
                 }
             }
         } catch (Throwable ignored) { }
-        return -1f;
+        return 0f; // it's a slider, but the value field wasn't found — knob at 0
     }
 
     // objectMouseOver (MovingObjectPosition) typeOfHit == BLOCK. We find it on the

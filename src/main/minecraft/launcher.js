@@ -231,6 +231,7 @@ async function launch(options, emit) {
     useOptifine = true,
     optimizeJvm = true,
     hypixelKey = '',
+    server = null,
     onSpawn,
     isCancelled,
   } = options;
@@ -411,6 +412,11 @@ async function launch(options, emit) {
   // LaunchWrapper consumes --tweakClass and hands off to OptiFine's tweaker,
   // which patches the game (custom sky, connected textures, …) then runs vanilla Main.
   if (optifineJar) gameArgs.push('--tweakClass', 'optifine.OptiFineTweaker');
+  // Direct-connect: 1.8.9 auto-joins a server given --server/--port.
+  if (server && String(server).trim()) {
+    const { host, port } = require('../serverping').parseHostPort(server);
+    if (host) { gameArgs.push('--server', host, '--port', String(port)); emit('log', `Auto-connect: ${host}:${port}`); }
+  }
 
   // Allow the user to cancel during the download/prepare phase (before spawn).
   if (isCancelled && isCancelled()) {

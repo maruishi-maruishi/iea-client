@@ -3,6 +3,8 @@ package dev.iea.client.module;
 import java.util.ArrayList;
 import java.util.List;
 
+import dev.iea.client.Theme;
+
 /** A toggleable feature with optional per-module settings. */
 public final class Module {
     public final String name;
@@ -10,6 +12,15 @@ public final class Module {
     public boolean enabled;
     public String descKey; // Lang key for a short description (shown on the settings page)
     public final List<Setting> settings = new ArrayList<Setting>();
+
+    // Optional key that toggles this module on/off in-game (0 = unbound).
+    public int toggleKey = 0;
+    // Per-module accent: when customColor is on, `color` (RGB, no alpha) is used instead of
+    // the global Theme accent for this module's UI/HUD highlights.
+    public boolean customColor = false;
+    public int color = Theme.DEFAULT_ACCENT;
+    // Hidden from the module grid — controlled from a dedicated tab (Theme / Settings) instead.
+    public boolean hidden = false;
 
     public Module(String name, String category, boolean enabledByDefault) {
         this.name = name;
@@ -25,6 +36,20 @@ public final class Module {
     public Module desc(String key) {
         this.descKey = key;
         return this;
+    }
+
+    public Module hide() { this.hidden = true; return this; }
+
+    /** This module's accent (ARGB): its custom colour when set, else the global theme accent. */
+    public int accent() {
+        return customColor ? (0xFF000000 | (color & 0xFFFFFF)) : Theme.ACCENT;
+    }
+
+    /** A darker shade of {@link #accent()} (for slider fills / active key tiles). */
+    public int accent2() {
+        if (!customColor) return Theme.ACCENT2;
+        int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
+        return 0xFF000000 | ((int) (r * 0.63f) << 16) | ((int) (g * 0.63f) << 8) | (int) (b * 0.63f);
     }
 
     public Setting get(String key) {

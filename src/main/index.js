@@ -44,9 +44,12 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 980,
     height: 640,
-    resizable: false,
-    maximizable: false,
-    fullscreenable: false,
+    minWidth: 900,
+    minHeight: 600,
+    resizable: true,
+    maximizable: true,
+    fullscreenable: true,
+    frame: false, // custom in-app title bar (React UI)
     backgroundColor: '#0e0f14',
     title: 'IEA Client',
     icon: path.join(__dirname, '..', 'renderer', 'assets', 'icon.png'),
@@ -57,8 +60,17 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  // Built React renderer (Vite -> renderer-dist), loaded via file://.
+  mainWindow.loadFile(path.join(__dirname, '..', '..', 'renderer-dist', 'index.html'));
 }
+
+// Frameless window controls (custom title bar buttons -> real window actions).
+ipcMain.on('win:minimize', () => { if (mainWindow) mainWindow.minimize(); });
+ipcMain.on('win:maximize', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMaximized()) mainWindow.unmaximize(); else mainWindow.maximize();
+});
+ipcMain.on('win:close', () => { if (mainWindow) mainWindow.close(); });
 
 app.whenReady().then(() => {
   migrateAccounts(userData()); // seed the account list from a legacy single account
@@ -143,11 +155,32 @@ ipcMain.handle('skin:model', (_e, uuid) => skins.modelOf(uuid)); // 'slim' | 'cl
 ipcMain.handle('news:get', () => getNews());
 ipcMain.handle('app:version', () => app.getVersion());
 
-// ---- resource packs (import + convert modern Java packs to 1.8.9) ----
-function resourcePacksDir() {
+// ---- saved servers (Servers tab) + live ping ----
+const serverping = require('./serverping');
+ipcMain.handle('servers:list', () => loadSettings(userData()).servers || []);
+ipcMain.handle('servers:add', (_e, name, address) => {
   const s = loadSettings(userData());
-  const gd = s.gameDir && s.gameDir.trim() ? s.gameDir.trim() : makePaths(userData()).gameDir;
-  const dir = path.join(gd, 'resourcepacks');
+  const servers = (s.servers || []).slice();
+  servers.push({ id: Date.now().toString(), name: String(name || address), address: String(address) });
+  saveSettings(userData(), { servers });
+  return servers;
+});
+ipcMain.handle('servers:remove', (_e, id) => {
+  const s = loadSettings(userData());
+  const servers = (s.servers || []).filter((sv) => sv.id !== id);
+  saveSettings(userData(), { servers });
+  return servers;
+});
+ipcMain.handle('servers:ping', (_e, address) => serverping.ping(address));
+
+// ---- resource packs (import + convert modern Java packs to 1.8.9) ----
+const options = require('./options');
+function gameDirPath() {
+  const s = loadSettings(userData());
+  return s.gameDir && s.gameDir.trim() ? s.gameDir.trim() : makePaths(userData()).gameDir;
+}
+function resourcePacksDir() {
+  const dir = path.join(gameDirPath(), 'resourcepacks');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -155,13 +188,47 @@ function resourcePacksDir() {
 ipcMain.handle('packs:list', () => {
   const dir = resourcePacksDir();
   try {
-    return fs.readdirSync(dir, { withFileTypes: true })
-      .filter((e) => e.isDirectory() || /\.zip$/i.test(e.name))
-      .map((e) => ({ name: e.name, folder: e.isDirectory() }));
+    const names = fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() || /\.zip$/i.test(e.name));
+    const all = names.map((e) => e.name);
+    const active = new Set(options.activeNames(gameDirPath(), all)); // from options.txt
+    return names.map((e) => ({ name: e.name, folder: e.isDirectory(), active: active.has(e.name) }));
   } catch (_) { return []; }
 });
 
+// Activate/deactivate a pack by editing options.txt's resourcePacks list.
+ipcMain.handle('packs:toggle', (_e, name, on) => {
+  try {
+    const dir = resourcePacksDir();
+    const all = fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() || /\.zip$/i.test(e.name)).map((e) => e.name);
+    let active = options.activeNames(gameDirPath(), all).filter((n) => all.includes(n));
+    active = active.filter((n) => n !== name);
+    if (on) active.push(name); // last entry = highest priority (top of the game's list)
+    options.setActive(gameDirPath(), active, all);
+    return active;
+  } catch (e) { return null; }
+});
+
 ipcMain.handle('packs:open', () => { const d = resourcePacksDir(); shell.openPath(d); return d; });
+
+// A pack's pack.png icon (folder or zip) as a data URL, for the Resource packs list.
+ipcMain.handle('packs:icon', (_e, name) => {
+  try {
+    const target = path.join(resourcePacksDir(), path.basename(name));
+    let buf = null;
+    if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
+      const p = path.join(target, 'pack.png');
+      if (fs.existsSync(p)) buf = fs.readFileSync(p);
+    } else if (/\.zip$/i.test(target) && fs.existsSync(target)) {
+      const AdmZip = require('adm-zip');
+      const e = new AdmZip(target).getEntry('pack.png');
+      if (e) buf = e.getData();
+    }
+    if (!buf || buf.length < 8) return null;
+    return 'data:image/png;base64,' + buf.toString('base64');
+  } catch (_) { return null; }
+});
 
 ipcMain.handle('packs:remove', (_e, name) => {
   const dir = resourcePacksDir();
@@ -253,6 +320,7 @@ ipcMain.handle('game:launch', async (_e, opts) => {
         useOptifine: false, // hard-disabled: IEA + OptiFine combo was too buggy (vanilla + IEA only)
         optimizeJvm: settings.optimizeJvm !== false, // perf flags + first-run options.txt
         hypixelKey: settings.hypixelKey || '', // written to iea-hypixel-key.txt for LevelHead
+        server: opts.server || null, // direct-connect target (Servers tab)
         onSpawn: (child) => { gameChild = child; },
         isCancelled: () => cancelRequested,
       },

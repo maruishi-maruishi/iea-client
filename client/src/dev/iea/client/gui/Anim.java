@@ -34,4 +34,9 @@ public final class Anim {
 
     /** Force a key to a value (e.g. reset to 0 so it animates in next frame). */
     public static void set(Object key, float v) { vals.put(key, v); }
+
+    /** Reset the frame clock so the NEXT tick() measures a single-frame dt instead of the
+     *  whole idle gap. Call when a menu opens after being closed, otherwise the first frame's
+     *  huge (clamped) dt makes the open animation jump almost instantly to its end. */
+    public static void resetClock() { last = System.nanoTime(); }
 }
