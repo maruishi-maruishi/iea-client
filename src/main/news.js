@@ -6,7 +6,7 @@
 
 const { getJSON } = require('./minecraft/http');
 
-const REPO = 'maruishijun1-rgb/iea-client';
+const REPO = 'maruishi-maruishi/iea-client';
 const TTL = 5 * 60 * 1000; // 5 min
 
 let cache = null;
